@@ -1,0 +1,11 @@
+post_create_hooks:
+  snippets:
+    collection_policies_repo:
+      - "CREATE POLICY dc2_insert ON {table} FOR INSERT TO dc2_admin USING ({column} ~ '\\d+\\.\\d+[ip]/')"
+      - "CREATE POLICY dc2_update ON {table} FOR UPDATE TO dc2_admin USING ({column} ~ '\\d+\\.\\d+[ip]/')"
+      - "CREATE POLICY dc2_delete ON {table} FOR DELETE TO dc2_admin USING ({column} ~ '\\d+\\.\\d+[ip]/')"
+    instrument_dimension_policies:
+      - "{snippits.init_row_security}"
+      - "GRANT SELECT, INSERT ON {table} TO PUBLIC"
+      - "CREATE POLICY imsim_insert ON {table} FOR INSERT TO dc2_admin USING ({column} = 'LSSTCam-imSim')"
+      - "CREATE POLICY phosim_insert ON {table} FOR INSERT TO dc2_admin USING ({column} = 'LSSTCam-phoSim')"
