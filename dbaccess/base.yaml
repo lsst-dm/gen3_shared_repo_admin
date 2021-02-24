@@ -1,0 +1,144 @@
+# This file is a draft of content that would be inserted into repository-level
+# registry configuration (i.e. in butler.yaml, under 'registry:', but never
+# coming from daf_butler).
+# It is also currently (as an example) the only documentation of what that
+# configuration would look like and what it would do.
+
+# It is expected that one of the per-repo files (main.yaml, DC2.yaml, etc.)
+# would be merged into this file; those provide additional snippets referenced
+# here that are specific to the instruments in those repos.
+
+post_create_hooks:
+  # This configuration section describes SQL hooks to be run after tables are
+  # created by butler.  Each hook or piece thereof is a list of SQL strings
+  # that may contain "{}"-delimited substitutions.  The {table} parameter is
+  # always provided as the name of the table.  Other parameters are documented
+  # below.
+  snippets:
+    # These are named snippets that can be used in other sections below, via
+    # syntax like "{snippets.<name>(param=<value>)}".  If the snippet does not
+    # use any parameters other than {table}, "{snippets.<name>}" is allowed.
+    # Snippets may refer to other snippets, as long as there are no cycles.
+    # Snippets may be defined as lists or strings, but a reference to a list
+    # snippet must be the entirety of a list element (as it is expanded to
+    # multiple list elements).
+    init_row_security:
+      # This snippet sets up row-level security for a table while preserving
+      # full admin access and public read access.  Hooks that use it should
+      # then explicitly enable both table-level and row-level modifications as
+      # desired (both must be satisfied for permission on any operation).
+      - "ALTER TABLE {table} ENABLE ROW SECURITY"
+      - "CREATE POLICY public_read ON {table} FOR SELECT USING (true)"
+      - "CREATE POLICY admin_all ON {table} FOR ALL TO repo_admin USING (true)"
+    is_user_collection:
+      "STARTS_WITH({column}, 'u/' || current_user || '/')"
+    is_processing_collection:
+      "STARTS_WITH({column}, 'runs/') OR (SELECT regex_match({column}, '([^/]+/)runs/.+'))[1] IN SELECT name FROM instrument"
+    is_cpp_collection:
+      "(SELECT regex_match({column}, '([^/]+/)calib.*'))[1] IN SELECT name FROM instrument"
+    is_shared_collection:
+      "STARTS_WITH({column}, 'refcats') OR {column} == 'skymaps')"
+    collection_policies:
+      # This snippet sets up row-level security for a table whose permissions
+      # are based on collection name patterns.
+      - "{snippits.init_row_security}"
+      - "GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO PUBLIC"
+      - "CREATE POLICY user_insert ON {table} FOR INSERT USING (snippets.is_user_collection(column={column}))"
+      - "CREATE POLICY user_update ON {table} FOR UPDATE USING (snippets.is_user_collection(column={column}))"
+      - "CREATE POLICY user_delete ON {table} FOR DELETE USING (snippets.is_user_collection(column={column}))"
+      - "CREATE POLICY processing_insert ON {table} FOR INSERT TO processing USING (snippets.is_processing_collection(column={column})"
+      - "CREATE POLICY processing_update ON {table} FOR UPDATE TO processing USING (snippets.is_processing_collection(column={column})"
+      - "CREATE POLICY processing_delete ON {table} FOR DELETE TO processing USING (snippets.is_processing_collection(column={column})"
+      - "CREATE POLICY cpp_insert ON {table} FOR INSERT TO cpp USING ({snippets.is_cpp_collection(column={column})})"
+      - "CREATE POLICY cpp_update ON {table} FOR UPDATE TO cpp USING ({snippets.is_cpp_collection(column={column})})"
+      - "CREATE POLICY cpp_delete ON {table} FOR DELETE TO cpp USING ({snippets.is_cpp_collection(column={column})})"
+      - "CREATE POLICY shared_insert ON {table} FOR INSERT TO shared USING ({snippets.is_shared_collection(column={column})})"
+      - "CREATE POLICY shared_update ON {table} FOR UPDATE TO shared USING ({snippets.is_shared_collection(column={column})})"
+      - "CREATE POLICY shared_delete ON {table} FOR DELETE TO shared USING ({snippets.is_shared_collection(column={column})})"
+      - "{snippets.collection_policies_repo}"  # repo-specific policies from a to-be-merged file
+    public_insert:
+      - "GRANT INSERT ON {table} TO PUBLIC"
+    public_manage:
+      - "GRANT INSERT, UPDATE, DELETE ON {table} TO PUBLIC"
+    shared_insert:
+      - "GRANT INSERT ON {table} TO shared"
+    shared_manage:
+      - "GRANT INSERT, UPDATE, DELETE ON {table} TO shared"
+  static:
+    # Hooks for tables created inside a `StaticTablesContext` (i.e. at repo
+    # creation time).
+    # We assume these tables are created (and hence owned) by repo_admin.
+    before:
+      # Run these before all hooks in this section (but after table creation).
+      - "GRANT SELECT, REFERENCES ON {table} TO PUBLIC"
+    after: [] # Run these after all hooks in this section.
+    default:
+      # Run this only if there is no matching hook in 'by_name'.
+
+      # By default, users can fully modify rows in tables.  Tables without
+      # specific hooks are frequently guarded in other ways (e.g. guarded
+      # tables with FKs or filesystem access controls).  This includes all
+      # datastore content and a lot of _summary and _overlap tables.
+      # It may still be possible for users to do bad things to some of these,
+      # but only via direct SQL.
+      - "{snippets.public_manage}"
+    by_name:
+      # Run these if the table name matches the key.
+
+      # butler_attributes and opaque_meta are fully populated at repo
+      # construction, so override the default to just not provide any non-admin
+      # access.
+      butler_attributes: []
+      opaque_meta: []
+
+      # DimensionGraph definitions are only created, never deleted.
+      dimension_graph_key: ["{snippets.public_insert}"]
+      dimension_graph_definition: ["{snippets.public_insert}"]
+
+      # skymap and subfilter dimension tables are managed by the 'shared' role.
+      # But dimension rows are never deleted.
+      skymap: ["{snippets.shared_insert}"]
+      tract: ["{snippets.shared_insert}"]
+      patch: ["{snippets.shared_insert}"]
+      subfilter: ["{snippets.shared_insert}"]
+
+
+      # DatasetTypes are managed by the 'shared' role.
+      dataset_type: ["{snippets.shared_manage}"]
+
+      # Datasets and collections have row-level security
+      # TODO: check column names
+      collection: ["{snippets.collection_policies(column='name')}"]
+      collection_chain: ["{snippets.collection_policies(column='parent')}"]
+      run: ["{snippets.collection_policies(column='name')}"]
+      dataset: ["{snippets.collection_policies(column='run_name')}"]
+
+      # instrument dimension tables are managed by per-instrument roles.
+      # These reference a snippet defined in a to-be-merged per-repo file.
+      instrument: ["{snippets.instrument_dimension_policies(column='name')}"]
+      detector: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      physical_filter: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      exposure: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      visit_system: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      visit: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      visit_definition: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+      visit_detector_region: ["{snippets.instrument_dimension_policies(column='instrument')}"]
+
+  dynamic:
+    # Rules for tables created by `Database.ensureTableExists`.
+    # We assume these tables are created (and hence owned) by regular users
+    # initially, but we always transfer ownership back to repo_admin.
+    before:
+      # Run these before all hooks in this section (but after table creation).
+      - "GRANT SELECT ON {table} TO PUBLIC"
+    after:
+      # Run these after all hooks in this section.
+      - "ALTER TABLE {table} OWNER TO repo_admin"
+    default:
+      # Run this if there is no matching hook in 'by_prefix'.
+      - "{snippets.public_manage}"
+    by_prefix:
+      # Run these if the table name starts with the key.
+      # Assume each table can only match one hook (user should define these
+      # accordingly).
+      dataset_: ["{snippets.collection_policies(column='collection_name')}"]
