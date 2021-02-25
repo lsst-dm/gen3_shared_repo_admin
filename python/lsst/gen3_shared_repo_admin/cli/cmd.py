@@ -19,6 +19,26 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._dataclasses import SiteDefinition, RepoDefinition
-from ._tool import RepoAdminTool
-from . import definitions
+from __future__ import annotations
+
+__all__ = ("admin_create",)
+
+import logging
+
+import click
+from lsst.daf.butler.cli.utils import ButlerCommand
+
+from .._tool import RepoAdminTool
+
+
+@click.command(cls=ButlerCommand, short_help="Admin interface for creating shared data repositories.")
+@click.argument("repo", type=str)
+@click.option("--date", type=str, envvar="LSST_REPO_ADMIN_DATE")
+@click.option("--site", type=str, envvar="LSST_REPO_ADMIN_SITE")
+@click.option("--verbose", type=bool, default=False)
+@click.option("--log-file", type=str, default="./gen3-repo-admin.log")
+def admin_create(repo, date, site, verbose, log_file):
+    log = logging.getLogger("gen3-repo-admin")
+    tool = RepoAdminTool.from_strings(repo, date=date, site=site, log=log)
+    # tool.create()
+    log.info("Repository root is %s.", tool.root)

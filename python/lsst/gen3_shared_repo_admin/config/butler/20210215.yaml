@@ -1,0 +1,6 @@
+registry:
+  managers:
+    # We use collection names directly as primary keys in shared repositories
+    # because it will make it easier to set up PostgreSQL row-level security
+    # based on collection name patterns.
+    collections: lsst.daf.butler.registry.collections.nameKey.NameKeyCollectionManager
