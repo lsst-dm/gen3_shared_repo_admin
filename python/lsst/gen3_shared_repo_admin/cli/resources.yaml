@@ -1,4 +1,0 @@
-cmd:
-  import: lsst.gen3_shared_repo_admin.cli.cmd
-  commands:
-    - admin-create

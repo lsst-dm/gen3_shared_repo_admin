@@ -29,7 +29,6 @@ import logging
 from typing import Optional
 
 from lsst.daf.butler import Butler, ButlerURI, Config, DimensionConfig
-from lsst.pipe.tasks.script.registerSkymap import MakeSkyMapConfig
 
 from ._dataclasses import RepoDefinition, SiteDefinition
 from .definitions import REPOS, SITES
@@ -104,6 +103,7 @@ class RepoAdminTool:
         return self._butler
 
     def register_skymaps(self, resume: bool = False):
+        from lsst.pipe.tasks.script.registerSkymap import MakeSkyMapConfig
         todo = {}
         for uri in self.repo.skymaps:
             config = MakeSkyMapConfig()

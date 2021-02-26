@@ -5,5 +5,5 @@ setupRequired(obs_decam)
 setupRequired(obs_lsst)
 setupRequired(pipe_tasks)
 
+envPrepend(PATH, ${PRODUCT_DIR}/bin)
 envPrepend(PYTHONPATH, ${PRODUCT_DIR}/python)
-envPrepend(DAF_BUTLER_PLUGINS, ${PRODUCT_DIR}/python/lsst/gen3_shared_repo_admin/cli/resources.yaml)
