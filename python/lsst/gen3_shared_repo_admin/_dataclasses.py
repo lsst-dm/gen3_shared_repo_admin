@@ -33,6 +33,7 @@ class SiteDefinition:
     repo_uri_template: str
     db_namespace_template: str
     db_uri_template: str
+    admin_log_template: str = "{root}/repo-admin.log"
 
 
 @dataclasses.dataclass

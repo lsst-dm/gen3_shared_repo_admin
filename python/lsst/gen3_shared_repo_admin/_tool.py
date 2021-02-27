@@ -28,6 +28,8 @@ from collections import defaultdict
 import logging
 from typing import Optional
 
+from tqdm import tqdm
+
 from lsst.daf.butler import Butler, ButlerURI, Config, DimensionConfig
 
 from ._dataclasses import RepoDefinition, SiteDefinition
@@ -56,15 +58,19 @@ class StepNotReadyError(RuntimeError):
 
 class RepoAdminTool:
 
-    def __init__(self, repo: RepoDefinition, site: SiteDefinition, log: logging.Logger):
+    def __init__(self, repo: RepoDefinition, site: SiteDefinition, dry_run: bool = False):
         self.repo = repo
         self.site = site
-        self.log = log
         self._butler = None
+        self.dry_run = dry_run
+        if dry_run:
+            self.log = logging.getLogger(f"butler-admin (testing)")
+        else:
+            self.log = logging.getLogger(f"butler-admin")
 
     @classmethod
-    def from_strings(cls, repo: str, site: str, date: str, log: logging.Logger) -> RepoAdminTool:
-        return cls(REPOS[repo][date], SITES[site], log=log)
+    def from_strings(cls, repo: str, site: str, date: str, dry_run: bool = False) -> RepoAdminTool:
+        return cls(REPOS[repo][date], SITES[site], dry_run=dry_run)
 
     @property
     def root(self) -> str:
@@ -89,34 +95,38 @@ class RepoAdminTool:
         return config
 
     def create(self) -> None:
-        self.log.info("Creating empty repository at %s.", self.repo.root)
-        Butler.makeRepo(self.root, config=self.make_butler_config(),
-                        dimensionConfig=self.make_dimension_config())
+        self.log.info("Creating empty repository at %s.", self.root)
+        if not self.dry_run:
+            Butler.makeRepo(self.root, config=self.make_butler_config(),
+                            dimensionConfig=self.make_dimension_config())
 
     @property
     def butler(self) -> Butler:
         if self._butler is None:
             try:
-                self._butler = Butler(self.root, writeable=True)
+                self._butler = Butler(self.root, writeable=not self.dry_run)
             except FileNotFoundError:
                 raise StepNotReadyError("Repo has not yet been created.")
         return self._butler
 
     def register_skymaps(self, resume: bool = False):
+        self.log.info("Registering SkyMaps in %s.", self.root)
         from lsst.pipe.tasks.script.registerSkymap import MakeSkyMapConfig
         todo = {}
-        for uri in self.repo.skymaps:
+        for uri in tqdm(self.repo.skymaps, desc="Loading SkyMap configuration"):
             config = MakeSkyMapConfig()
-            config.loadFromStream(uri.read().decode())
+            config.loadFromStream(ButlerURI(uri).read().decode())
             todo[config.name] = config
         if resume:
-            existing = {r.name for r in self.butler.queryDimensionRecords("skymap")}
+            existing = {r.name for r in tqdm(self.butler.queryDimensionRecords("skymap"),
+                                             desc="Finding already-registered SkyMaps")}
             for name in existing:
                 del todo[name]
                 self.log.info("SkyMap '%s' is already registered; skipping.", name)
-        for config in todo.values():
-            self.log.info("Constructing SkyMap '%s' from configuration.", name)
+        for config in tqdm(todo.values(), desc="Constructing and registering SkyMaps"):
+            self.log.info("Constructing SkyMap '%s' from configuration.", config.name)
             skymap = config.skyMap.apply()
             skymap.logSkyMapInfo(self.log)
-            self.log.info("Registering SkyMap '%s' in database.", name)
-            skymap.register(config.name, self.butler)
+            self.log.info("Registering SkyMap '%s' in database.", config.name)
+            if not self.dry_run:
+                skymap.register(config.name, self.butler)
