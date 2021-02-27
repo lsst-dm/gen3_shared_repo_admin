@@ -23,10 +23,7 @@ from __future__ import annotations
 
 __all__ = ("RepoAdminTool",)
 
-import dataclasses
-from collections import defaultdict
 import logging
-from typing import Optional
 
 from tqdm import tqdm
 
@@ -34,22 +31,6 @@ from lsst.daf.butler import Butler, ButlerURI, Config, DimensionConfig
 
 from ._dataclasses import RepoDefinition, SiteDefinition
 from .definitions import REPOS, SITES
-
-
-@dataclasses.dataclass
-class InstrumentRepoStatus:
-    registered: Optional[bool] = None
-    curated_calibs: Optional[bool] = None
-    raws: dict[int, set[int]] = dataclasses.field(default_factory=lambda: defaultdict(set))
-    visits: set[int] = dataclasses.field(default_factory=set)
-
-
-@dataclasses.dataclass
-class RepoStatus:
-    created: Optional[bool] = None
-    skymaps: dict[str, bool] = dataclasses.field(default_factory=dict)
-    refcats: dict[str, set[int]] = dataclasses.field(default_factory=lambda: defaultdict(set))
-    instruments: dict[str, InstrumentRepoStatus] = dataclasses.field(default_factory=dict)
 
 
 class StepNotReadyError(RuntimeError):
