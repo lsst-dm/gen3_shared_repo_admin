@@ -67,12 +67,8 @@ class RepoAdminTool:
         self.dry_run = dry_run
         self.work_dir = os.path.join(work_root, f"{self.repo.name}_{self.repo.date}")
         os.makedirs(self.work_dir, exist_ok=True)
-        if dry_run:
-            self.progress = Progress("butler-admin (testing)")
-            self.log = logging.getLogger(f"butler-admin (testing)")
-        else:
-            self.progress = Progress("butler-admin")
-            self.log = logging.getLogger(f"butler-admin")
+        self.progress = Progress("butler-admin")
+        self.log = logging.getLogger(f"butler-admin")
         self.jobs = jobs
 
     @classmethod
