@@ -85,6 +85,7 @@ def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: st
     python_logger.setLevel(logging.INFO)
     python_logger.addHandler(lsst.log.LogHandler())
     Progress.set_handler(ConsoleProgressHandler())
+    dry_run = dry_run or prep or status
     tool = RepoAdminTool.from_strings(repo, date=date, site=site, work_root=work_root, dry_run=dry_run,
                                       jobs=jobs)
     if status:
