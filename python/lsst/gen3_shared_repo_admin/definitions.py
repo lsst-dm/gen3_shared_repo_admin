@@ -25,7 +25,13 @@ __all__ = ("REPOS", "SITES")
 
 import dataclasses
 
+# We try hard to avoid importing much of the stack here, as that's slow
+# (especially compared to expected command-line responsivity for things like
+# checking status).
+
 from ._dataclasses import RepoDefinition, SiteDefinition
+from . import common
+from . import hsc
 
 
 # Template repo definitions that don't include dates, for things that don't
@@ -33,16 +39,27 @@ from ._dataclasses import RepoDefinition, SiteDefinition
 
 MAIN = RepoDefinition(
     name="main",
-    skymaps=[
-        "resource://lsst.gen3_shared_repo_admin/config/skymaps/hsc_rings_v1.py",
-    ]
+    operations=(
+        common.CreateRepo(),
+        hsc.operations(),
+        common.Group(
+            "skymaps", (
+                common.RegisterSkyMap("hsc_rings_v1"),
+            ),
+        ),
+    ),
 )
 
 DC2 = RepoDefinition(
     name="dc2",
-    skymaps=[
-        "resource://lsst.gen3_shared_repo_admin/config/skymaps/DC2.py",
-    ]
+    operations=(
+        common.CreateRepo(),
+        common.Group(
+            "skymaps", (
+                common.RegisterSkyMap("DC2"),
+            ),
+        )
+    ),
 )
 
 CCSO = RepoDefinition(

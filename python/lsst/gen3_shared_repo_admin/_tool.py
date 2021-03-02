@@ -24,90 +24,146 @@ from __future__ import annotations
 __all__ = ("RepoAdminTool",)
 
 import logging
+import os
 
-from tqdm import tqdm
-
-from lsst.daf.butler import Butler, ButlerURI, Config, DimensionConfig
+from lsst.daf.butler import Butler, Progress
 
 from ._dataclasses import RepoDefinition, SiteDefinition
+from ._operation import OperationNotReadyError
 from .definitions import REPOS, SITES
 
 
-class StepNotReadyError(RuntimeError):
-    pass
-
-
 class RepoAdminTool:
+    """A helper object that maintains shared state for all repository
+    administration operations.
 
-    def __init__(self, repo: RepoDefinition, site: SiteDefinition, dry_run: bool = False):
+    A `RepoAdminTool` instance is constructed for each command-line tool
+    invocation, and essentially provides the corresponding high-level Python
+    interface.
+
+    Parameters
+    ----------
+    repo : `RepoDefinition`
+        Definition of the concrete repository.
+    site : `SiteDefinition`
+        Definition of the site where this instance of the repository lives.
+    work_root : `str`
+        Root directory for logs and status files.  Must be consistent between
+        runs.
+    dry_run : `bool`, optional
+        If `True`, do not make any writes to the data repository (writes to
+        ``work_root`` may still occur).
+    jobs : `int`, optional
+        Number of processes to use, when possible.  Defaults to 1.
+    """
+    def __init__(self, repo: RepoDefinition, site: SiteDefinition, work_root: str, dry_run: bool = False,
+                 jobs: int = 1):
         self.repo = repo
         self.site = site
+        self.operations = {}
+        for parent_operation in self.repo.operations:
+            self.operations.update((op.name, op) for op in parent_operation.flatten())
         self._butler = None
         self.dry_run = dry_run
+        self.work_dir = os.path.join(work_root, f"{self.repo.name}_{self.repo.date}")
+        os.makedirs(self.work_dir, exist_ok=True)
         if dry_run:
+            self.progress = Progress("butler-admin (testing)")
             self.log = logging.getLogger(f"butler-admin (testing)")
         else:
+            self.progress = Progress("butler-admin")
             self.log = logging.getLogger(f"butler-admin")
+        self.jobs = jobs
 
     @classmethod
-    def from_strings(cls, repo: str, site: str, date: str, dry_run: bool = False) -> RepoAdminTool:
-        return cls(REPOS[repo][date], SITES[site], dry_run=dry_run)
+    def from_strings(cls, repo: str, site: str, date: str, work_root: str, dry_run: bool = False,
+                     jobs: int = 1) -> RepoAdminTool:
+        """Construct a `RepoAdminTool` from the name, site, and date strings
+        that identify the repo and the site.
+
+        Parameters
+        ----------
+        repo : `str`
+            Base name of the repository definition.
+        site : `str`
+            Name for the site definition.
+        date : `str`
+            Date for the repository definition, as an 8-char YYYYMMDD string.
+        work_root : `str`
+            Root directory for logs and status files.  Must be consistent
+            between runs.
+        dry_run : `bool`, optional
+            If `True`, do not make any writes to the data repository (writes to
+            ``work_root`` may still occur).
+        jobs : `int`, optional
+            Number of processes to use, when possible.  Defaults to 1.
+
+        Returns
+        -------
+        tool : `RepoAdminTool`
+            A new tool instance.
+        """
+        return cls(REPOS[repo][date], SITES[site], work_root=work_root, dry_run=dry_run, jobs=jobs)
 
     @property
     def root(self) -> str:
+        """Absolute path or URI to the data repository root (`str`).
+        """
         return self.site.repo_uri_template.format(repo=self.repo)
-
-    def make_butler_config(self) -> Config:
-        config = Config()
-        config[".registry.db"] = self.site.db_uri_template.format(repo=self.repo)
-        config[".registry.namespace"] = self.site.db_namespace_template.format(repo=self.repo)
-        for template in self.repo.butler_config_templates:
-            uri = ButlerURI(template.format(repo=self.repo, site=self.site))
-            if uri.exists():
-                config.update(Config(uri))
-        return config
-
-    def make_dimension_config(self) -> DimensionConfig:
-        config = DimensionConfig()
-        for template in self.repo.dimension_config_templates:
-            uri = ButlerURI(template.format(repo=self.repo, site=self.site))
-            if uri.exists():
-                config.update(Config(uri))
-        return config
-
-    def create(self) -> None:
-        self.log.info("Creating empty repository at %s.", self.root)
-        if not self.dry_run:
-            Butler.makeRepo(self.root, config=self.make_butler_config(),
-                            dimensionConfig=self.make_dimension_config())
 
     @property
     def butler(self) -> Butler:
+        """A butler client for the data repository (`lsst.daf.butler.Butler`).
+
+        This is read-only if and only if ``self.dry-run`` is `True`.
+        """
         if self._butler is None:
             try:
                 self._butler = Butler(self.root, writeable=not self.dry_run)
             except FileNotFoundError:
-                raise StepNotReadyError("Repo has not yet been created.")
+                raise OperationNotReadyError("Repo has not yet been created.")
         return self._butler
 
-    def register_skymaps(self, resume: bool = False):
-        self.log.info("Registering SkyMaps in %s.", self.root)
-        from lsst.pipe.tasks.script.registerSkymap import MakeSkyMapConfig
-        todo = {}
-        for uri in tqdm(self.repo.skymaps, desc="Loading SkyMap configuration"):
-            config = MakeSkyMapConfig()
-            config.loadFromStream(ButlerURI(uri).read().decode())
-            todo[config.name] = config
-        if resume:
-            existing = {r.name for r in tqdm(self.butler.queryDimensionRecords("skymap"),
-                                             desc="Finding already-registered SkyMaps")}
-            for name in existing:
-                del todo[name]
-                self.log.info("SkyMap '%s' is already registered; skipping.", name)
-        for config in tqdm(todo.values(), desc="Constructing and registering SkyMaps"):
-            self.log.info("Constructing SkyMap '%s' from configuration.", config.name)
-            skymap = config.skyMap.apply()
-            skymap.logSkyMapInfo(self.log)
-            self.log.info("Registering SkyMap '%s' in database.", config.name)
-            if not self.dry_run:
-                skymap.register(config.name, self.butler)
+    def status(self, name: str) -> None:
+        """Print status for the named operation to stdout.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the operation.
+        """
+        if name is None:
+            name = self.repo.name
+        self.operations[name].print_status(self, indent=0)
+
+    def prep(self, name: str) -> None:
+        """Prepare the named operation, performing only steps that do not
+        require modifying the data repository.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the operation.
+        """
+        if name is None:
+            name = self.repo.name
+        self.log.info("Preparing %s in %s.", name, self.root)
+        self.operations[name].prep(self)
+
+    def run(self, name: str) -> None:
+        """Run the named operation.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the operation.
+
+        Notes
+        -----
+        Whether an operation requires `prep` to be invoked before `run` depends
+        on the operation, but should is always reported by `status`.
+        """
+        if name is None:
+            name = self.repo.name
+        self.log.info("Running %s in %s.", name, self.root)
+        self.operations[name].run(self)
