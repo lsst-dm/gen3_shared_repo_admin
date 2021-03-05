@@ -26,7 +26,7 @@ __all__ = ("FindFilesFunction", "DeduplicatingRawIngestGroup", "RawIngest")
 import fnmatch
 import logging
 import os
-from typing import Callable, Iterator, Set, Tuple, Type, TYPE_CHECKING
+from typing import Any, Callable, Iterator, Set, Tuple, Type, TYPE_CHECKING
 
 from lsst.utils import doImport
 
@@ -161,17 +161,17 @@ class RawIngest(AdminOperation):
         todo, done = self.read_file_lists(tool)
         if not todo:
             return
-        task = self.make_task(tool)
         ingested = []
+        task = self.make_task(tool, on_success=ingested.extend)
         if tool.dry_run:
             # Need a for loop to invoke returned lazy iterator.
-            for _ in task.prep(todo, ingested=ingested, processes=tool.jobs):
+            for _ in task.prep(todo, processes=tool.jobs):
                 pass
         else:
             file = open(self._in_progress_filename(tool), "wt")
             try:
                 file.flush()
-                task.run(todo, ingested=ingested, processes=tool.jobs)
+                task.run(todo, processes=tool.jobs)
             finally:
                 done.update(dataset.path for dataset in ingested)
                 file.writelines(line + "\n" for line in sorted(done))
@@ -208,12 +208,12 @@ class RawIngest(AdminOperation):
         """
         return os.path.join(tool.work_dir, f"{self.name}_completed.txt")
 
-    def make_task(self, tool: RepoAdminTool) -> RawIngestTask:
+    def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
         """Construct the `RawIngestTask` instance to use in `run`.
         """
         config = self.TaskClass.ConfigClass()
         config.transfer = "direct"
-        return self.TaskClass(config=config, butler=tool.butler)
+        return self.TaskClass(config=config, butler=tool.butler, **kwargs)
 
     def read_input_list(self, tool: RepoAdminTool) -> Set[str]:
         """Read the post-`prep` list of files to process.
