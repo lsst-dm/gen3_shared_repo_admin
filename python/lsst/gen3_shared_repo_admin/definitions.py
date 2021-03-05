@@ -32,6 +32,7 @@ import dataclasses
 from ._dataclasses import RepoDefinition, SiteDefinition
 from . import common
 from . import hsc
+from . import rubin
 
 
 # Template repo definitions that don't include dates, for things that don't
@@ -41,12 +42,13 @@ MAIN = RepoDefinition(
     name="main",
     operations=(
         common.CreateRepo(),
-        hsc.operations(),
         common.Group(
             "skymaps", (
                 common.RegisterSkyMap("hsc_rings_v1"),
             ),
         ),
+        hsc.operations(),
+        rubin.main_operations(),
     ),
 )
 
@@ -58,16 +60,24 @@ DC2 = RepoDefinition(
             "skymaps", (
                 common.RegisterSkyMap("DC2"),
             ),
-        )
+        ),
     ),
 )
 
 CCSO = RepoDefinition(
     name="ccso",
+    operations=(
+        common.CreateRepo(),
+        rubin.ccso_operations(),
+    ),
 )
 
 TESTSTAND = RepoDefinition(
     name="teststand",
+    operations=(
+        common.CreateRepo(),
+        rubin.teststand_operations(),
+    ),
 )
 
 # Concrete repo definitions that do include dates, and whatever specializations
