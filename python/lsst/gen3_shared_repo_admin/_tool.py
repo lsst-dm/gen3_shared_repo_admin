@@ -68,7 +68,7 @@ class RepoAdminTool:
         self.work_dir = os.path.join(work_root, f"{self.repo.name}_{self.repo.date}")
         os.makedirs(self.work_dir, exist_ok=True)
         self.progress = Progress("butler-admin")
-        self.log = logging.getLogger(f"butler-admin")
+        self.log = logging.getLogger("butler-admin")
         self.jobs = jobs
 
     @classmethod
