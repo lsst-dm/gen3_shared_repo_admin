@@ -203,7 +203,7 @@ class RawIngest(AdminOperation):
         return os.path.join(tool.work_dir, f"{self.name}_in_progress.txt")
 
     def _completed_filename(self, tool: RepoAdminTool) -> str:
-        """Filename used to save the completed file list in `prep`, when it has
+        """Filename used to save the completed file list in `run`, when it has
         finished fully ingesting those files.
         """
         return os.path.join(tool.work_dir, f"{self.name}_completed.txt")
