@@ -163,3 +163,17 @@ class RepoAdminTool:
             name = self.repo.name
         self.log.info("Running %s in %s.", name, self.root)
         self.operations[name].run(self)
+
+    def cleanup(self, name: str) -> None:
+        """Attempt to clean up a failed or incomplete run of the named
+        operation.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the operation.
+        """
+        if name is None:
+            name = self.repo.name
+        self.log.info("Cleaning up %s in %s.", name, self.root)
+        self.operations[name].cleanup(self)

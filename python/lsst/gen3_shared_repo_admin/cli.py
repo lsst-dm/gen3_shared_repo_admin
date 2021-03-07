@@ -78,8 +78,9 @@ class ConsoleProgressHandler(ProgressHandler):
 @click.option("-j", "--jobs", type=int, default=1)
 @click.option("--prep", is_flag=True)
 @click.option("--status", is_flag=True)
+@click.option("--cleanup", is_flag=True)
 def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: str, dry_run: bool,
-        jobs: int, prep: bool, status: bool):
+        jobs: int, prep: bool, status: bool, cleanup: bool):
     lsst.log.configure_prop(_LOG_PROP.format(log_file=f"{work_root}/{repo}_{date}.log"))
     python_logger = logging.getLogger()
     python_logger.setLevel(logging.INFO)
@@ -90,9 +91,13 @@ def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: st
                                       jobs=jobs)
     if status:
         assert not prep
+        assert not cleanup
         tool.status(name)
     elif prep:
+        assert not cleanup
         tool.prep(name)
+    elif cleanup:
+        tool.cleanup(name)
     else:
         tool.run(name)
 
