@@ -24,9 +24,15 @@ from __future__ import annotations
 __all__ = ("operations",)
 
 import os
+from typing import Tuple, TYPE_CHECKING
 
+from ._operation import SimpleStatus
 from .ingest import DeduplicatingRawIngestGroup, RawIngest
-from .common import Group, RegisterInstrument
+from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
+from .common import Group, RegisterInstrument, DefineChain
+
+if TYPE_CHECKING:
+    from ._tool import RepoAdminTool
 
 
 def raw_ingest(subdir: str, top="/datasets/hsc/raw") -> RawIngest:
@@ -54,6 +60,71 @@ def raw_ingest(subdir: str, top="/datasets/hsc/raw") -> RawIngest:
     )
 
 
+class WriteStrayLightData(CalibrationOperation):
+    """A concrete `AdminOperation` that copies HSC's special y-band stray light
+    data file from a Gen2 repo.
+
+    This operation assumes it is the only operation working with its output
+    collections.
+    """
+
+    def __init__(self, name: str, labels: Tuple[str, ...], directory: str):
+        super().__init__(name, "HSC", labels)
+        self.directory = directory
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        SimpleStatus.check(self, tool).print_status(self, tool, indent)
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        if not tool.dry_run:
+            with SimpleStatus.run_context(self, tool):
+                self.instrument(tool).ingestStrayLightData(
+                    tool.butler,
+                    directory=self.directory,
+                    transfer="direct",
+                    labels=self.labels,
+                )
+
+
+def convert_calibs(subdir: str, top="/datasets/hsc/calib", root="/datasets/hsc/repo") -> Group:
+    """Helper function to generate a `ConvertCalibrations` appropriate for a
+    Gen2 HSC calibration repo.
+
+    Parameters
+    ----------
+    subdir : `str`
+        Subdirectory of ``top`` that contains the calibration repo.  Also used
+        as the operation name.
+    top : `str`, optional
+        Root directory for all raws for this instrument.
+    root : `str`, optional
+        Path to the HSC Gen2 repository root.
+
+    Returns
+    -------
+    group : `Group`
+        A group of calibration conversion operations.
+    """
+    return Group(
+        f"HSC-calibs-{subdir}", (
+            ConvertCalibrations(
+                name=f"HSC-calibs-{subdir}-convert",
+                instrument_name="HSC",
+                labels=("gen2", subdir),
+                root=root,
+                repo_path=os.path.join(root, top, subdir),
+            ),
+            WriteStrayLightData(
+                name=f"HSC-calibs-{subdir}-straylight",
+                labels=("gen2", subdir),
+                directory=os.path.join(top, subdir, "STRAY_LIGHT"),
+            ),
+        )
+    )
+
+
 def operations() -> Group:
     """Helper function that returns all HSC-specific operations.
 
@@ -77,6 +148,19 @@ def operations() -> Group:
                         "sxds-i2",
                     )
                 )
-            )
+            ),
+            Group(
+                "HSC-calibs", (
+                    WriteCuratedCalibrations("HSC-calibs-curated", "HSC", labels=("DM-28636",)),
+                    convert_calibs("20180117"),
+                    convert_calibs("20200115"),
+                    DefineChain("HSC-calibs-default", "HSC/calib", (
+                        "HSC/calib/gen2/20180117",
+                        "HSC/calib/DM-28636",
+                        "HSC/calib/gen2/20180117/unbounded",
+                        "HSC/calib/DM-28636/unbounded",
+                    )),
+                ),
+            ),
         )
     )
