@@ -22,17 +22,19 @@
 from __future__ import annotations
 
 __all__ = (
-    "Group",
     "CreateRepo",
+    "DefineChain",
+    "DefineTag",
+    "Group",
     "RegisterInstrument",
     "RegisterSkyMap",
 )
 
 import os
-from typing import Iterator, Tuple, TYPE_CHECKING
+from typing import Iterable, Iterator, Tuple, TYPE_CHECKING
 
 from lsst.utils import doImport
-from lsst.daf.butler import ButlerURI, Butler, Config, DimensionConfig
+from lsst.daf.butler import ButlerURI, Butler, Config, DatasetRef, DimensionConfig
 
 from ._operation import AdminOperation, OperationNotReadyError
 
@@ -217,3 +219,115 @@ class RegisterSkyMap(AdminOperation):
         tool.log.info("Registering SkyMap '%s' in database.", config.name)
         if not tool.dry_run:
             skymap.register(config.name, tool.butler)
+
+
+class DefineTag(AdminOperation):
+    """A concrete `AdminOperation` that defines a
+    `~lsst.daf.butler.CollectionType.TAGGED` collection.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    tagged : `str`
+        Named of the `~lsst.daf.butler.CollectionType.TAGGED` collection to
+        create.
+    query_args : `Iterable`
+        Iterable of ``(*args, **kwargs)`` pairs for
+        `lsst.daf.butler.Registry.queryDatasets`, to use to obtain the datasets
+        to associate into ``tagged``.
+    """
+
+    def __init__(self, name: str, tagged: str, query_args: Iterable[Tuple[tuple, dict]]):
+        self.name = name
+        self.tagged = tagged
+        self._query_args = tuple(query_args)
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler.registry import MissingCollectionError
+        try:
+            refs = set(tool.butler.registry.queryDatasets(..., collections=self.tagged))
+        except MissingCollectionError:
+            print(f"{' '*indent}{self.name}: not started")
+        else:
+            if refs == set(self._query(tool)):
+                print(f"{' '*indent}{self.name}: done")
+            else:
+                print(f"{' '*indent}{self.name}: definition changed; run again")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler import CollectionType
+        refs = set(self._query(tool))
+        tool.log.info("Found %d datasets to associate into %s.", len(refs), self.tagged)
+        if not tool.dry_run:
+            tool.butler.registry.registerCollection(self.tagged, CollectionType.TAGGED)
+            tool.butler.registry.associate(self.tagged, refs)
+
+    def cleanup(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        if not tool.dry_run:
+            tool.butler.registry.removeCollection(self.tagged)
+
+    def _query(self, tool: RepoAdminTool) -> Iterator[DatasetRef]:
+        """Iterate over all datasets to tag,
+        """
+        for args, kwargs in self._query_args:
+            yield from tool.butler.registry.queryDatasets(*args, **kwargs)
+
+
+class DefineChain(AdminOperation):
+    """A concrete `AdminOperation` that defines a
+    `~lsst.daf.butler.CollectionType.CHAINED` collection.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    chain : `str`
+        Named of the `~lsst.daf.butler.CollectionType.CHAINED` collection to
+        create.
+    children : `tuple` [ `str` ]
+        Names of the child collections.
+    """
+
+    def __init__(self, name: str, chain: str, children: Tuple[str, ...]):
+        self.name = name
+        self.chain = chain
+        self.children = children
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler.registry import MissingCollectionError
+        try:
+            children = tool.butler.registry.getCollectionChain(self.chain)
+        except MissingCollectionError:
+            try:
+                c = set(tool.butler.registry.queryCollections(self.children))
+            except MissingCollectionError:
+                print(f"{' '*indent}{self.name}: blocked; some child collections do not exist")
+                return
+            if c == set(self.children):
+                print(f"{' '*indent}{self.name}: ready to run")
+            else:
+                print(f"{' '*indent}{self.name}: blocked; child collection(s): {set(self.children) - c}")
+        else:
+            if tuple(children) == self.children:
+                print(f"{' '*indent}{self.name}: done")
+            else:
+                print(f"{' '*indent}{self.name}: definition changed; run again")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler import CollectionType
+        if not tool.dry_run:
+            tool.butler.registry.registerCollection(self.chain, CollectionType.CHAINED)
+            tool.butler.registry.setCollectionChain(self.chain, self.children)
+
+    def cleanup(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        if not tool.dry_run:
+            tool.butler.registry.removeCollection(self.chain)
