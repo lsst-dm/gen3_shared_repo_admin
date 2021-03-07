@@ -21,10 +21,13 @@
 
 from __future__ import annotations
 
-__all__ = ("AdminOperation", "IncompleteOperationError", "OperationNotReadyError")
+__all__ = ("AdminOperation", "IncompleteOperationError", "OperationNotReadyError", "SimpleStatus")
 
 from abc import ABC, abstractmethod
-from typing import Iterator, TYPE_CHECKING
+from contextlib import contextmanager
+import enum
+from pathlib import Path
+from typing import Generator, Iterator, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -117,3 +120,130 @@ class AdminOperation(ABC):
         ``tool.butler`` if ``tool.dry_run`` is `True` as an extra precaution.
         """
         raise NotImplementedError()
+
+    def cleanup(self, tool: RepoAdminTool) -> None:
+        """Attempt to revert an aborted or incomplete `run` invocation.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        """
+        raise NotImplementedError(f"{self.name} does not support cleanup.")
+
+
+class SimpleStatus(enum.Enum):
+    """An enumeration-based helper class for operations that do not have
+    a natural way to track their status.
+
+    `SimpleStatus` assumes that the status of an operation can be fully
+    described by its enumeration values, and provides methods to both check
+    that status and report it by manipulating zero-size files.
+
+    Operation classes must use `print_status` (or at least `check`) and
+    `run_context` together.
+    """
+    NOT_STARTED = "not started"
+    IN_PROGRESS = "in progress"
+    INTERRUPTED = "interrupted"
+    DONE = "done"
+
+    @classmethod
+    def check(cls, op: AdminOperation, tool: RepoAdminTool) -> SimpleStatus:
+        """Check the current status of the operation, returning it as an
+        enumeration value.
+
+        Parameters
+        ----------
+        op : `AdminOperation`
+            Operation whose status should be checked.
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        status : `SimpleStatus`
+            Enumeration value indicating current status.
+        """
+        for status in (cls.DONE, cls.IN_PROGRESS, cls.INTERRUPTED):
+            if status.filename(op, tool).exists():
+                return status
+        return cls.NOT_STARTED
+
+    def print_status(self, op: AdminOperation, tool: RepoAdminTool, indent: int) -> None:
+        """Print this status value to STDOUT in a way that can be used to
+        implement `AdminOperation.print_status`.
+
+        Parameters
+        ----------
+        op : `AdminOperation`
+            Operation whose status should be checked.
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        indent : `str`
+            Number of spaces to indent reporting.
+        """
+        print(f"{' '*indent}{op.name}: {self.value}")
+
+    def filename(self, op: AdminOperation, tool: RepoAdminTool) -> Path:
+        """Return the file name associated with this status value.
+
+        Parameters
+        ----------
+        op : `AdminOperation`
+            Operation whose status should be checked.
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        filename : `Path`
+            Path object representing the status file.
+        """
+        return Path(f"{tool.work_dir}/{op.name}.{self.value.replace(' ', '_')}")
+
+    @classmethod
+    @contextmanager
+    def run_context(cls, op: AdminOperation, tool: RepoAdminTool) -> Generator[None, None, None]:
+        """Return a context manager that manipulates status files in a way
+        consistent with `check`.
+
+        All writes that could fail in an `AdminOperation.run` operation should
+        be wrapped in this context.
+
+        Parameters
+        ----------
+        op : `AdminOperation`
+            Operation whose status should be checked.
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        context : `ContextManager`
+            Context manager with no interface of its own.
+        """
+        in_progress = cls.IN_PROGRESS.filename(op, tool)
+        in_progress.touch(exist_ok=True)
+        try:
+            yield
+        except BaseException:
+            in_progress.replace(cls.INTERRUPTED.filename(op, tool))
+            raise
+        else:
+            in_progress.replace(cls.DONE.filename(op, tool))
+
+    @classmethod
+    def cleanup(cls, op: AdminOperation, tool: RepoAdminTool) -> None:
+        """Delete all status files.
+
+        Parameters
+        ----------
+        op : `AdminOperation`
+            Operation whose status should be checked.
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        """
+        for status in cls:
+            status.filename(op, tool).unlink(missing_ok=True)
