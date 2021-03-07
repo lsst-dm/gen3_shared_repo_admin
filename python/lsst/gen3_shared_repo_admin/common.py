@@ -181,13 +181,23 @@ class RegisterInstrument(AdminOperation):
 
 
 class RegisterSkyMap(AdminOperation):
+    """A concrete `AdminOperation` that calls `BaseSkyMap.register`, using
+    configuration packaged within `gen3_shared_repo_admin` itself.
 
+    Parameters
+    ----------
+    skymap_name : `str`
+        Name for the skymap dimension record; also used as the filename
+        (without extension) for the config file, and the operation name
+        (with a ``skymaps-`` prefix).
+    """
     def __init__(self, skymap_name: str) -> None:
         super().__init__(f"skymaps-{skymap_name}")
         self.skymap_name = skymap_name
         self.config_uri = f"resource://lsst.gen3_shared_repo_admin/config/skymaps/{skymap_name}.py"
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
         try:
             tool.butler.registry.expandDataId(skymap=self.name)
         except LookupError:
@@ -195,10 +205,8 @@ class RegisterSkyMap(AdminOperation):
         else:
             print(f"{' '*indent}{self.name}: done")
 
-    def prep(self, tool: RepoAdminTool) -> None:
-        pass
-
     def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
         from lsst.pipe.tasks.script.registerSkymap import MakeSkyMapConfig
         config = MakeSkyMapConfig()
         config.loadFromStream(ButlerURI(self.config_uri).read().decode())
