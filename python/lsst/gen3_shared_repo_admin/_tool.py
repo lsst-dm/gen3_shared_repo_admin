@@ -24,7 +24,7 @@ from __future__ import annotations
 __all__ = ("RepoAdminTool",)
 
 import logging
-import os
+from pathlib import Path
 
 from lsst.daf.butler import Butler, Progress
 
@@ -47,7 +47,7 @@ class RepoAdminTool:
         Definition of the concrete repository.
     site : `SiteDefinition`
         Definition of the site where this instance of the repository lives.
-    work_root : `str`
+    work_root : `Path`
         Root directory for logs and status files.  Must be consistent between
         runs.
     dry_run : `bool`, optional
@@ -56,7 +56,7 @@ class RepoAdminTool:
     jobs : `int`, optional
         Number of processes to use, when possible.  Defaults to 1.
     """
-    def __init__(self, repo: RepoDefinition, site: SiteDefinition, work_root: str, dry_run: bool = False,
+    def __init__(self, repo: RepoDefinition, site: SiteDefinition, work_root: Path, dry_run: bool = False,
                  jobs: int = 1):
         self.repo = repo
         self.site = site
@@ -65,8 +65,8 @@ class RepoAdminTool:
             self.operations.update((op.name, op) for op in parent_operation.flatten())
         self._butler = None
         self.dry_run = dry_run
-        self.work_dir = os.path.join(work_root, f"{self.repo.name}_{self.repo.date}")
-        os.makedirs(self.work_dir, exist_ok=True)
+        self.work_dir = work_root.joinpath(f"{self.repo.name}_{self.repo.date}")
+        self.work_dir.mkdir(parents=True, exist_ok=True)
         self.progress = Progress("butler-admin")
         self.log = logging.getLogger("butler-admin")
         self.jobs = jobs
@@ -99,7 +99,7 @@ class RepoAdminTool:
         tool : `RepoAdminTool`
             A new tool instance.
         """
-        return cls(REPOS[repo][date], SITES[site], work_root=work_root, dry_run=dry_run, jobs=jobs)
+        return cls(REPOS[repo][date], SITES[site], work_root=Path(work_root), dry_run=dry_run, jobs=jobs)
 
     @property
     def root(self) -> str:

@@ -26,11 +26,12 @@ __all__ = ("FindFilesFunction", "DeduplicatingRawIngestGroup", "RawIngest")
 import fnmatch
 import logging
 import os
+from pathlib import Path
 from typing import Any, Callable, Iterator, Set, Tuple, Type, TYPE_CHECKING
 
 from lsst.utils import doImport
 
-from ._operation import AdminOperation, IncompleteOperationError
+from ._operation import AdminOperation, IncompleteOperationError, OperationNotReadyError
 from .common import Group
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from ._tool import RepoAdminTool
 
 
-FindFilesFunction = Callable[[str, "RepoAdminTool"], Set[str]]
+FindFilesFunction = Callable[[str, "RepoAdminTool"], Set[Path]]
 
 
 class RawIngest(AdminOperation):
@@ -69,6 +70,8 @@ class RawIngest(AdminOperation):
         logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
         logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
 
+    CHUNK_SIZE = 10000
+
     @staticmethod
     def find_file_glob(top_template: str, pattern_template: str) -> FindFilesFunction:
         """A function that recursively finds files according to a glob pattern
@@ -87,18 +90,18 @@ class RawIngest(AdminOperation):
             and ``site`` (`SiteDefinition`) arguments to form the actual
             filename-only glob pattern.
         """
-        def wrapper(name: str, tool: RepoAdminTool) -> Set[str]:
+        def wrapper(name: str, tool: RepoAdminTool) -> Set[Path]:
             top = top_template.format(name=name, repo=tool.repo, site=tool.site)
             pattern = pattern_template.format(name=name, repo=tool.repo, site=tool.site)
 
-            def recurse_into(path: str) -> Iterator[str]:
+            def recurse_into(path: str) -> Iterator[Path]:
                 subdirs = []
                 for entry in tool.progress.wrap(os.scandir(path), desc=f"Scanning {path}"):
                     if entry.is_symlink():
                         tool.log.debug("Ignoring symlink %s/%s.", path, entry.name)
                     elif entry.is_file(follow_symlinks=False):
                         if fnmatch.fnmatchcase(entry.name, pattern):
-                            yield entry.path
+                            yield Path(entry.path)
                     else:
                         subdirs.append(entry.path)
                 for subdir in tool.progress.wrap(subdirs, desc=f"Descending into subdirectories of {path}"):
@@ -113,7 +116,7 @@ class RawIngest(AdminOperation):
         in_progress_filename = self._in_progress_filename(tool)
         input_filename = self._input_filename(tool)
         if os.path.exists(input_filename):
-            todo, done = self.read_file_lists(tool)
+            todo, done = self.read_files(tool)
             if not todo:
                 print(f"{' '*indent}{self.name}: ingest done")
             elif not done:
@@ -134,7 +137,7 @@ class RawIngest(AdminOperation):
         tmp_filename = self._tmp_filename(tool)
         with open(tmp_filename, "wt") as file:
             file.writelines(
-                line + "\n" for line in
+                str(path) + "\n" for path in
                 tool.progress.wrap(
                     sorted(self.find_files(self.name, tool)),
                     desc=f"Writing {self.name} file list"
@@ -158,23 +161,31 @@ class RawIngest(AdminOperation):
                 f"in '{completed_filename}' and then delete "
                 f"'{in_progress_filename}'."
             )
-        todo, done = self.read_file_lists(tool)
+        todo, done = self.read_files(tool)
         if not todo:
             return
+        sorted_todo = sorted([str(path) for path in todo])
+        chunks = [sorted_todo[n: min(n + self.CHUNK_SIZE, len(sorted_todo))]
+                  for n in range(0, len(sorted_todo), self.CHUNK_SIZE)]
         ingested = []
         task = self.make_task(tool, on_success=ingested.extend)
         if tool.dry_run:
             # Need a for loop to invoke returned lazy iterator.
-            for _ in task.prep(todo, processes=tool.jobs):
-                pass
+            for chunk in tool.progress.wrap(chunks, desc=f"Ingesting in {self.CHUNK_SIZE}-file chunks"):
+                for _ in task.prep(chunk, processes=tool.jobs):
+                    pass
         else:
             file = open(self._in_progress_filename(tool), "wt")
             try:
                 file.flush()
-                task.run(todo, processes=tool.jobs)
+                for chunk in tool.progress.wrap(chunks, desc=f"Ingesting in {self.CHUNK_SIZE}-file chunks"):
+                    try:
+                        task.run(chunk, processes=tool.jobs)
+                    except RuntimeError:
+                        continue
             finally:
                 done.update(dataset.path for dataset in ingested)
-                file.writelines(line + "\n" for line in sorted(done))
+                file.writelines(str(line) + "\n" for line in sorted(done))
                 file.close()
                 os.replace(self._in_progress_filename(tool), self._completed_filename(tool))
 
@@ -184,29 +195,29 @@ class RawIngest(AdminOperation):
         """
         return doImport(self.task_class_name)
 
-    def _tmp_filename(self, tool: RepoAdminTool) -> str:
+    def _tmp_filename(self, tool: RepoAdminTool) -> Path:
         """Filename used to save the to-do file list in `prep`, before it
         finishes.
         """
-        return os.path.join(tool.work_dir, f"{self.name}_files.tmp.txt")
+        return tool.work_dir.joinpath(f"{self.name}_files.tmp.txt")
 
-    def _input_filename(self, tool: RepoAdminTool) -> str:
+    def _input_filename(self, tool: RepoAdminTool) -> Path:
         """Filename used to save the to-do file list `prep`, when it has
         finished.
         """
-        return os.path.join(tool.work_dir, f"{self.name}_files.txt")
+        return tool.work_dir.joinpath(f"{self.name}_files.txt")
 
-    def _in_progress_filename(self, tool: RepoAdminTool) -> str:
+    def _in_progress_filename(self, tool: RepoAdminTool) -> Path:
         """Filename used to save the completed file list in `run`, before it
         finishes.
         """
-        return os.path.join(tool.work_dir, f"{self.name}_in_progress.txt")
+        return tool.work_dir.joinpath(f"{self.name}_in_progress.txt")
 
-    def _completed_filename(self, tool: RepoAdminTool) -> str:
+    def _completed_filename(self, tool: RepoAdminTool) -> Path:
         """Filename used to save the completed file list in `run`, when it has
         finished fully ingesting those files.
         """
-        return os.path.join(tool.work_dir, f"{self.name}_completed.txt")
+        return tool.work_dir.joinpath(f"{self.name}_completed.txt")
 
     def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
         """Construct the `RawIngestTask` instance to use in `run`.
@@ -215,26 +226,37 @@ class RawIngest(AdminOperation):
         config.transfer = "direct"
         return self.TaskClass(config=config, butler=tool.butler, **kwargs)
 
-    def read_input_list(self, tool: RepoAdminTool) -> Set[str]:
+    def read_input_files(self, tool: RepoAdminTool) -> Set[Path]:
         """Read the post-`prep` list of files to process.
+
+        This method requires input file to already exist, as it should
+        only be called in contexts where this is true.
         """
         input_filename = self._input_filename(tool)
+        if not input_filename.exists():
+            raise OperationNotReadyError(f"{self.name} needs to be prepped first.")
         with open(input_filename, "rt") as file:
-            todo = {line.strip() for line in file}
+            todo = {Path(line.strip()) for line in file}
         return todo
 
-    def read_file_lists(self, tool: RepoAdminTool) -> Tuple[Set[str], Set[str]]:
+    def read_done_files(self, tool: RepoAdminTool) -> Set[Path]:
+        """Read the post-`run` list of files fully ingested.
+        """
+        completed_filename = self._completed_filename(tool)
+        done = set()
+        if completed_filename.exists():
+            with open(completed_filename, "rt") as file:
+                done.update(Path(line.strip()) for line in file)
+        return done
+
+    def read_files(self, tool: RepoAdminTool) -> Tuple[Set[Path], Set[Path]]:
         """Read the post-`prep` list of files to do, and the post-`run` list
         of files fully ingested, and return sets that contain what still
         needs to be done and what has already been done.
         """
-        completed_filename = self._completed_filename(tool)
-        todo = self.read_input_list(tool)
-        done = set()
-        if os.path.exists(completed_filename):
-            with open(completed_filename, "rt") as file:
-                done.update(line.strip() for line in file)
-            todo -= done
+        todo = self.read_input_files(tool)
+        done = self.read_done_files(tool)
+        todo -= done
         return todo, done
 
 
@@ -246,6 +268,10 @@ class DeduplicatingRawIngestGroup(Group):
     The `prep` stages of all child operations must be run *in order*, but after
     this is done the `run` stages may be run in any order.
 
+    This class can remove duplicates even after some files have been
+    ingested according to a non-deduplicated list.  It assumes filenames
+    are (alone) enough to uniquely identify raw files.
+
     Parameters
     ----------
     name : `str`
@@ -256,24 +282,44 @@ class DeduplicatingRawIngestGroup(Group):
     """
     def __init__(self, name: str, children: Tuple[RawIngestTask, ...]):
         super().__init__(name, children)
-        previous = []
+        before = []
+        after = list(self.children)
         for child in self.children:
-            child.find_files = self.skip_already_found(tuple(previous), child.find_files)
-            previous.append(child)
+            del after[0]
+            child.find_files = self.remove_duplicates(tuple(before), tuple(after), child, child.find_files)
+            before.append(child)
 
     children: Tuple[RawIngest, ...]
 
     @staticmethod
-    def skip_already_found(previous: Tuple[RawIngest, ...], func: FindFilesFunction) -> FindFilesFunction:
+    def remove_duplicates(before: Tuple[RawIngest, ...], after: Tuple[RawIngest, ...], me: RawIngest,
+                          func: FindFilesFunction) -> FindFilesFunction:
         """A callable for the ``find_files`` argument to `RawIngest` that
-        removes files found in a previous child ingest `prep` stage.
+        removes files found in any earlier sibling ingest `prep` stage, and any
+        files already ingested by any earlier or later sibling `run` stage.
 
         This is automatically installed by the `DeduplicatingRawIngestGroup`
         constructor.
         """
-        def adapted(name: str, tool: RepoAdminTool) -> Set[str]:
-            already_found = set()
-            for other_ingest_operation in previous:
-                already_found.update(other_ingest_operation.read_input_list(tool))
-            return func(name, tool) - already_found
+        def adapted(name: str, tool: RepoAdminTool) -> Set[Path]:
+            found_by_me_dict = {path.name: path for path in func(name, tool)}
+            done_by_me = {path.name for path in me.read_done_files(tool)}
+            tool.log.info("%s: found %d files, with %d done...", me.name,
+                          len(found_by_me_dict), len(done_by_me))
+            keep = set(found_by_me_dict.keys() | done_by_me)
+            for other_op in before:
+                found_by_other = {path.name for path in other_op.read_input_files(tool)}
+                already_taken = (found_by_other - done_by_me) & keep
+                tool.log.info("  %s: removing %d files also found by %s", me.name, len(already_taken),
+                              other_op.name)
+                keep -= already_taken
+            for other_op in after:
+                done_by_other = {path.name for path in other_op.read_done_files(tool)}
+                assert not done_by_other & done_by_me
+                already_taken = done_by_other & keep
+                tool.log.info("  %s: removing %d files already ingested by %s", me.name, len(already_taken),
+                              other_op.name)
+                keep -= already_taken
+            tool.log.info("  %s: kept %d files", me.name, len(keep))
+            return {found_by_me_dict[name] for name in keep}
         return adapted
