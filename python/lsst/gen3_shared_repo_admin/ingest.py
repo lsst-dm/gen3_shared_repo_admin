@@ -27,7 +27,7 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Iterator, Set, Tuple, Type, TYPE_CHECKING
+from typing import Any, Callable, Iterator, Optional, Set, Tuple, Type, TYPE_CHECKING
 
 from lsst.utils import doImport
 
@@ -35,6 +35,7 @@ from ._operation import AdminOperation, IncompleteOperationError, OperationNotRe
 from .common import Group
 
 if TYPE_CHECKING:
+    from lsst.daf.butler import Progress
     from lsst.obs.base import RawIngestTask
     from ._tool import RepoAdminTool
 
@@ -61,17 +62,27 @@ class RawIngest(AdminOperation):
         instead of a type or instance to defer imports (which can be very slow)
         until they are actually needed, rather than include them in
         `RepoDefinition` object instantiations.
+    collection : `str`, optional
+        Name of the `~lsst.daf.butler.CollectionType.RUN` collection that
+        datasets should be ingested into.  Default is to defer to the
+        `Instrument` class, which should be appropriate for all real-data
+        repositories, but not necessary those with simulated data (for which
+        more collections may be necessary to distinguish between simulation
+        versions).
     """
     def __init__(self, name: str, find_files: FindFilesFunction,
-                 task_class_name: str = "lsst.obs.base.RawIngestTask"):
+                 task_class_name: str = "lsst.obs.base.RawIngestTask",
+                 collection: Optional[str] = None):
         super().__init__(name)
         self.find_files = find_files
         self.task_class_name = task_class_name
+        self.collection = collection
 
     CHUNK_SIZE = 10000
 
     @staticmethod
-    def find_file_glob(top_template: str, pattern_template: str) -> FindFilesFunction:
+    def find_file_glob(top_template: str, pattern_template: str, follow_symlinks: bool = False
+                       ) -> FindFilesFunction:
         """A function that recursively finds files according to a glob pattern
         template, for use as the ``find_files`` construction argument.
 
@@ -87,6 +98,10 @@ class RawIngest(AdminOperation):
             processed via `str.format` with named ``repo`` (`RepoDefinition`)
             and ``site`` (`SiteDefinition`) arguments to form the actual
             filename-only glob pattern.
+        follow_symlinks : `bool`, optional
+            If `True`, follow symlinks and resolve them into their true paths,
+            and user guarantees there are no cycles (no checking is performed).
+            If `False`, all symlinks are ignored.
 
         Returns
         -------
@@ -97,20 +112,21 @@ class RawIngest(AdminOperation):
             top = top_template.format(name=name, repo=tool.repo, site=tool.site)
             pattern = pattern_template.format(name=name, repo=tool.repo, site=tool.site)
 
-            def recurse_into(path: str) -> Iterator[Path]:
+            def recurse_into(path: str, progress: Progress) -> Iterator[Path]:
                 subdirs = []
-                for entry in tool.progress.wrap(os.scandir(path), desc=f"Scanning {path}"):
-                    if entry.is_symlink():
-                        tool.log.debug("Ignoring symlink %s/%s.", path, entry.name)
-                    elif entry.is_file(follow_symlinks=False):
+                for entry in progress.wrap(os.scandir(path), desc=f"Scanning {path}"):
+                    if entry.is_file(follow_symlinks=follow_symlinks):
                         if fnmatch.fnmatchcase(entry.name, pattern):
-                            yield Path(entry.path)
-                    else:
-                        subdirs.append(entry.path)
-                for subdir in tool.progress.wrap(subdirs, desc=f"Descending into subdirectories of {path}"):
-                    yield from recurse_into(subdir)
+                            yield Path(entry.path if not follow_symlinks else os.path.realpath(entry.path))
+                    elif entry.is_dir(follow_symlinks=follow_symlinks):
+                        subdirs.append(entry.path if not follow_symlinks else os.path.realpath(entry.path))
+                    # Else case is deliberately ignored; possibilities are
+                    # entries that no longer exist (race conditions) and
+                    # symlinks when follow_symlinks is False.
+                for subdir in progress.wrap(subdirs, desc=f"Descending into subdirectories of {path}"):
+                    yield from recurse_into(subdir, progress.at(logging.DEBUG))
 
-            return set(recurse_into(top))
+            return set(recurse_into(top, tool.progress))
 
         return wrapper
 
@@ -185,7 +201,7 @@ class RawIngest(AdminOperation):
                 file.flush()
                 for chunk in tool.progress.wrap(chunks, desc=f"Ingesting in {self.CHUNK_SIZE}-file chunks"):
                     try:
-                        task.run(chunk, processes=tool.jobs)
+                        task.run(chunk, processes=tool.jobs, run=self.collection)
                     except RuntimeError:
                         continue
             finally:
