@@ -64,7 +64,7 @@ class RawIngest(AdminOperation):
     """
     def __init__(self, name: str, find_files: FindFilesFunction,
                  task_class_name: str = "lsst.obs.base.RawIngestTask"):
-        self.name = name
+        super().__init__(name)
         self.find_files = find_files
         self.task_class_name = task_class_name
         logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
@@ -89,6 +89,11 @@ class RawIngest(AdminOperation):
             processed via `str.format` with named ``repo`` (`RepoDefinition`)
             and ``site`` (`SiteDefinition`) arguments to form the actual
             filename-only glob pattern.
+
+        Returns
+        -------
+        files : `Set` [ `Path` ]
+            Set of full paths to the files to ingest.
         """
         def wrapper(name: str, tool: RepoAdminTool) -> Set[Path]:
             top = top_template.format(name=name, repo=tool.repo, site=tool.site)
@@ -191,7 +196,7 @@ class RawIngest(AdminOperation):
 
     @property
     def TaskClass(self) -> Type[RawIngestTask]:
-        """Task class instance to run.
+        """Task class (`RawIngestTask` subclass) to run.
         """
         return doImport(self.task_class_name)
 
@@ -221,6 +226,13 @@ class RawIngest(AdminOperation):
 
     def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
         """Construct the `RawIngestTask` instance to use in `run`.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        **kwargs
+            Additional keyword arguments to forward to the task constructor.
         """
         config = self.TaskClass.ConfigClass()
         config.transfer = "direct"
@@ -231,16 +243,37 @@ class RawIngest(AdminOperation):
 
         This method requires input file to already exist, as it should
         only be called in contexts where this is true.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        paths : `set` [ `Path` ]
+            Set of full paths to all files that should be ingested, including
+            those already ingested.
         """
         input_filename = self._input_filename(tool)
         if not input_filename.exists():
             raise OperationNotReadyError(f"{self.name} needs to be prepped first.")
         with open(input_filename, "rt") as file:
-            todo = {Path(line.strip()) for line in file}
-        return todo
+            paths = {Path(line.strip()) for line in file}
+        return paths
 
     def read_done_files(self, tool: RepoAdminTool) -> Set[Path]:
         """Read the post-`run` list of files fully ingested.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        done : `set` [ `Path` ]
+            Set of full paths to all files that have already been ingested.
         """
         completed_filename = self._completed_filename(tool)
         done = set()
@@ -253,6 +286,18 @@ class RawIngest(AdminOperation):
         """Read the post-`prep` list of files to do, and the post-`run` list
         of files fully ingested, and return sets that contain what still
         needs to be done and what has already been done.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        todo : `set` [ `Path` ]
+            Set of full paths to all files that still need to be ingested.
+        done : `set` [ `Path` ]
+            Set of full paths to all files that have already been ingested.
         """
         todo = self.read_input_files(tool)
         done = self.read_done_files(tool)
