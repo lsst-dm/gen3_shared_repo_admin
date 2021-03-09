@@ -35,6 +35,7 @@ from . import common
 from . import hsc
 from . import rubin
 from . import refcats
+from . import dc2
 
 
 # Template repo definitions that don't include dates, for things that don't
@@ -77,6 +78,10 @@ DC2 = RepoDefinition(
                 common.RegisterSkyMap("DC2"),
             ),
         ),
+        common.RegisterInstrument("imSim-registration", "lsst.obs.lsst.LsstCamImSim"),
+        common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim"),
+        dc2.raw_operations(),
+        dc2.refcat_operations(),
     ),
 )
 
