@@ -24,6 +24,7 @@ from __future__ import annotations
 __all__ = ("REPOS", "SITES")
 
 import dataclasses
+from pathlib import Path
 
 # We try hard to avoid importing much of the stack here, as that's slow
 # (especially compared to expected command-line responsivity for things like
@@ -33,6 +34,7 @@ from ._dataclasses import RepoDefinition, SiteDefinition
 from . import common
 from . import hsc
 from . import rubin
+from . import refcats
 
 
 # Template repo definitions that don't include dates, for things that don't
@@ -46,6 +48,20 @@ MAIN = RepoDefinition(
             "skymaps", (
                 common.RegisterSkyMap("hsc_rings_v1"),
             ),
+        ),
+        common.Group(
+            "refcats", tuple(
+                refcats.RefCatIngest(
+                    name,
+                    path=Path(f"/datasets/refcats/htm/v1/{name}"),
+                    collection="refcats/DM-28636",
+                )
+                for name in (
+                    "gaia_dr2_20200414",
+                    "ps1_pv3_3pi_20170110",
+                    "sdss-dr9-fink-v5b",
+                )
+            )
         ),
         hsc.operations(),
         rubin.main_operations(),
