@@ -240,7 +240,7 @@ class DefineTag(AdminOperation):
     """
 
     def __init__(self, name: str, tagged: str, query_args: Iterable[Tuple[tuple, dict]]):
-        self.name = name
+        super().__init__(name)
         self.tagged = tagged
         self._query_args = tuple(query_args)
 
@@ -295,7 +295,7 @@ class DefineChain(AdminOperation):
     """
 
     def __init__(self, name: str, chain: str, children: Tuple[str, ...]):
-        self.name = name
+        super().__init__(name)
         self.chain = chain
         self.children = children
 
