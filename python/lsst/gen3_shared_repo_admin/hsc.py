@@ -30,6 +30,7 @@ from ._operation import SimpleStatus
 from .ingest import DeduplicatingRawIngestGroup, RawIngest
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
 from .common import Group, RegisterInstrument, DefineChain
+from .visits import DefineVisits
 
 if TYPE_CHECKING:
     from ._tool import RepoAdminTool
@@ -162,5 +163,6 @@ def operations() -> Group:
                     )),
                 ),
             ),
+            DefineVisits("HSC-visits", "HSC"),
         )
     )
