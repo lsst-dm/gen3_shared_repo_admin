@@ -112,8 +112,6 @@ class ConvertCalibrations(CalibrationOperation):
         super().__init__(name, instrument_name=instrument_name, labels=labels)
         self._repo_path = repo_path
         self._root = root
-        logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
-        logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
 
     DATASET_TYPE_NAMES = ("flat", "bias", "dark", "fringe", "sky")
 
@@ -123,6 +121,8 @@ class ConvertCalibrations(CalibrationOperation):
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
+        logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
+        logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
         task = self.make_task(tool)
         if not tool.dry_run:
             with SimpleStatus.run_context(self, tool):

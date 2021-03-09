@@ -67,8 +67,6 @@ class RawIngest(AdminOperation):
         super().__init__(name)
         self.find_files = find_files
         self.task_class_name = task_class_name
-        logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
-        logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
 
     CHUNK_SIZE = 10000
 
@@ -154,6 +152,8 @@ class RawIngest(AdminOperation):
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
+        logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
+        logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
         in_progress_filename = self._in_progress_filename(tool)
         completed_filename = self._completed_filename(tool)
         if os.path.exists(in_progress_filename):
