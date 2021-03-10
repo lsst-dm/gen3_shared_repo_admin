@@ -63,7 +63,7 @@ class ConsoleProgressHandler(ProgressHandler):
 
     def get_progress_bar(self, iterable, desc, total, level):
         # Docstring inherited.
-        return tqdm.tqdm(iterable, total=total, desc=desc, file=sys.stdout, leave=level >= logging.INFO)
+        return tqdm.tqdm(iterable, total=total, desc=desc, file=sys.stdout, leave=False)
 
 
 @click.command("butler-admin", short_help="Administrative interface for major shared data repositories.")
