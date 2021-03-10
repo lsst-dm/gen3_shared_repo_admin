@@ -72,7 +72,7 @@ class Group(AdminOperation):
             try:
                 child.print_status(tool, indent + 2)
             except OperationNotReadyError as err:
-                print(f"{' '*(indent + 2)}{child.name}: blocked. {err}")
+                print(f"{' '*(indent + 2)}{child.name}: blocked; {err}")
 
     def prep(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
