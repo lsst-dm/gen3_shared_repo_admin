@@ -23,11 +23,53 @@ from __future__ import annotations
 
 __all__ = ("raw_operations", "refcat_operations")
 
+import os
 from pathlib import Path
+from typing import Dict, Set, TYPE_CHECKING
 
 from .common import Group
-from .ingest import DeduplicatingRawIngestGroup, RawIngest
+from .ingest import ExposureFinder, RawIngest
 from .refcats import RefCatIngest
+
+if TYPE_CHECKING:
+    from ._tool import RepoAdminTool
+
+
+class _ExposureFinder(ExposureFinder):
+    """An `ExposureFinder` implementation for DC2 data (and possibly,
+    accidentally, the way some of it is organized at NCSA).
+
+    This finder does not expect to ingest only full exposures, as apparently
+    much of the dataset at NCSA involved transfers of partial exposures,
+    presumably corresponding to tract boundaries.  Symbolic links are always
+    followed.
+
+    Parameters
+    ----------
+    root : `str`
+        Root path to search; expected to directly containing subdirectories
+        that each map to exactly one exposure (with the exposure ID as the
+        subdirectory name).
+    file_pattern : `str`
+        Glob pattern that raw files must match.
+    """
+
+    def __init__(self, root: str, file_pattern: str):
+        self._root = Path(root)
+        self._file_pattern = file_pattern
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        result = {}
+        for entry in tool.progress.wrap(os.scandir(self._root), desc=f"Scanning {self._root}"):
+            if entry.is_dir(follow_symlinks=True):
+                result[int(entry.name)] = entry.path
+        return result
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        path = found[exposure_id]
+        return set(self.recursive_glob(tool, path, self._file_pattern, follow_symlinks=True))
 
 
 def raw_operations() -> Group:
@@ -41,26 +83,26 @@ def raw_operations() -> Group:
     """
     return Group(
         "2.2i", (
-            DeduplicatingRawIngestGroup(
+            Group(
                 "2.2i-raw", (
                     RawIngest(
                         "2.2i-raw-DR6",
-                        find_files=RawIngest.find_file_glob(
+                        _ExposureFinder(
                             "/datasets/DC2/DR6/Run2.2i/patched/2021-02-10/raw",
                             "*-R??-S??-det???-???.fits",
-                            follow_symlinks=True,
                         ),
+                        instrument_name="LSSTCam-imSim",
                         collection="2.2i/raw/all",
-                    ),
+                    ).split_into(4).save_found(),
                     RawIngest(
                         "2.2i-raw-monthly",
-                        find_files=RawIngest.find_file_glob(
+                        _ExposureFinder(
                             "/datasets/DC2/repoRun2.2i/raw",
                             "*-R??-S??-det???.fits",
-                            follow_symlinks=True,
                         ),
+                        instrument_name="LSSTCam-imSim",
                         collection="2.2i/raw/all",
-                    ),
+                    ).save_found(),
                 ),
             ),
         )

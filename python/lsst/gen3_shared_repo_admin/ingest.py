@@ -21,224 +21,547 @@
 
 from __future__ import annotations
 
-__all__ = ("FindFilesFunction", "DeduplicatingRawIngestGroup", "RawIngest")
+__all__ = (
+    "ExposureFinder",
+    "IngestLogicError",
+    "RawIngest",
+    "RawIngestGroup",
+)
 
+from abc import ABC, abstractmethod
 import fnmatch
+import json
 import logging
+import math
 import os
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional, Set, Tuple, Type, TYPE_CHECKING
+import re
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Match,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
 from lsst.utils import doImport
 
-from ._operation import AdminOperation, IncompleteOperationError, OperationNotReadyError
+from ._operation import AdminOperation, OperationNotReadyError
 from .common import Group
 
 if TYPE_CHECKING:
-    from lsst.daf.butler import Progress
+    from lsst.daf.butler import FileDataset, Progress
     from lsst.obs.base import RawIngestTask
     from ._tool import RepoAdminTool
 
 
-FindFilesFunction = Callable[[str, "RepoAdminTool"], Set[Path]]
+class ExposureFinder(ABC):
+    """A helper interface for the `RawIngest` operation that identifies the
+    files to be ingested and groups them by exposure.
+
+    `ExposureFinder` objects are designed to be composed to add additional
+    behaviors (usually filtering).  Subclasses should also inherit from
+    `AdminOperation` (or hold nested `AdminOperation` instances) if they make
+    persistent changes to filesystems or databases.
+    """
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        """Recursively iterate over any nested `AdminOperation` instances,
+        including ``self`` if appropriate.
+
+        Yields
+        ------
+        op : `AdminOperation`
+           `AdminOperation` instances.
+        """
+        yield from ()
+
+    @abstractmethod
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        """Find exposures and the root directories that contain all files to
+        be ingested for them.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        exposures : `dict` [ `int`, `Path` ]
+            Dictionary mapping integer exposure ID values to a directory that
+            (not necessarily directly) includes all of the raw files to ingest
+            for that exposure.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        """Expand the found path for a directory into a set of paths for its
+        raw files.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        exposure_id : `int`
+            Integer exposure ID being ingested.
+        found : `dict` [ `int`, `Path` ]
+            The dictionary returned by `find`, or a subset of that dictionary
+            that is guaranteed to include `exposure_id`.
+
+        Returns
+        -------
+        raws : `set` [ `Path` ]
+            Paths to raw files.
+
+        Notes
+        -----
+        Implementations may recursively scan ``found[exposure_id]`` for files
+        that look like raws, or use predefined filename patterns to predict
+        them.  This function can also check for incomplete exposures and raise
+        exceptions if desired.
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def recursive_regex(tool: RepoAdminTool, top: Path, file_regex: str, follow_symlinks: bool = False,
+                        ) -> Iterator[Tuple[Path, Match]]:
+        """Recursively scan a directory for files whose names (not full paths)
+        match a regular expression.
+
+        This function is provided as a convenience for implementations of
+        `find` and `expand`.  It is not used by the base class itself.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        top : `Path`
+            Root path to search.
+        file_regex : `str`
+            Regular expression to match against filenames (including
+            extensions, but not including the directory).  For file symlinks,
+            this is applied to the symlink, not its target.
+        follow_symlinks : `bool`, optional
+            If `True`, follow directory and file symlinks.  If `False`
+            (default) all symlinks are ignored.
+
+        Yields
+        ------
+        path : `Path`
+            Matched paths to files.
+        match : `Match`
+            The regular expression match object.
+        """
+        compiled_regex = re.compile(file_regex)
+
+        def recurse_into(path: Path, progress: Progress) -> Iterator[Tuple[Path, Match]]:
+            subdirs = []
+            for entry in progress.wrap(os.scandir(path), desc=f"Scanning {path}"):
+                if entry.is_file(follow_symlinks=follow_symlinks):
+                    if (m := compiled_regex.match(entry.name)) is not None:
+                        yield Path(entry.path if not follow_symlinks else os.path.realpath(entry.path)), m
+                elif entry.is_dir(follow_symlinks=follow_symlinks):
+                    subdirs.append(entry.path if not follow_symlinks else os.path.realpath(entry.path))
+                # Else case is deliberately ignored; possibilities are
+                # entries that no longer exist (race conditions) and
+                # symlinks when follow_symlinks is False.
+            for subdir in progress.wrap(subdirs, desc=f"Descending into subdirectories of {path}"):
+                yield from recurse_into(subdir, progress)
+
+        yield from recurse_into(top, tool.progress.at(logging.DEBUG))
+
+    @staticmethod
+    def recursive_glob(tool: RepoAdminTool, top: Path, file_pattern: str, follow_symlinks: bool = False,
+                       ) -> Iterator[Path]:
+        """Recursively scan a directory for files whose names (not full paths)
+        match a shell glob.
+
+        This function is provided as a convenience for implementations of
+        `find` and `expand`.  It is not used by the base class itself.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        top : `Path`
+            Root path to search.
+        file_pattern : `str`
+            Glob pattern to match against filenames (including extensions, but
+            not including the directory).  For file symlinks, this is applied
+            to the symlink, not its target.
+        follow_symlinks : `bool`, optional
+            If `True`, follow directory and file symlinks.  If `False`
+            (default) all symlinks are ignored.
+
+        Yields
+        ------
+        path : `Path`
+            Matched paths to files.
+        """
+        file_regex = fnmatch.translate(file_pattern)
+        yield from (
+            path for path, _ in ExposureFinder.recursive_regex(tool, top, file_regex, follow_symlinks)
+        )
+
+    def saved_as(self, name: str) -> ExposureFinder:
+        """Return an adapted version of the `ExposureFinder` that saves result
+        of calling `find` to a JSON file for fast and consistent retrieval.
+
+        Parameters
+        ----------
+        name : `str`
+            Name of the `AdminOperation` that will save the file list.
+
+        Returns
+        -------
+        finder_operation : `ExposureFinder`, `AdminOperation`
+            An object that is both an `ExposureFinder` and `AdminOperation`,
+            which delegates to ``self.find`` when `AdminOperation.run` is
+            called, saves the results, and loads the saved
+            dictionary when its own `ExposureFinder.find` is called.
+        """
+        return _SaveFoundExposuresAdapter(name, self)
 
 
-class RawIngest(AdminOperation):
-    """A concrete `AdminOperation` that ingests raw images via `RawIngestTask`.
+class _SaveFoundExposuresAdapter(AdminOperation, ExposureFinder):
+    """Adapter class for `ExposureFinder` that saves found exposures.
+
+    Should only be constructed by calling `ExposureFinder.saved_as`,
+    `RawIngest.save_found`, or `RawIngestGroup.save_found`; the class
+    itself is an implementation detail.
+
+    Parameters
+    ----------
+    name : `str`
+        Name for this `AdminOperation`.
+    adapted : `ExposureFinder`
+        `ExposureFinder` instance to delegate to.
+    """
+
+    def __init__(self, name: str, adapted: ExposureFinder):
+        super().__init__(name)
+        self._adapted = adapted
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        # Docstring inherited.
+        yield from self._adapted.flatten()
+        yield self
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        filename = self._filename(tool)
+        if not filename.exists():
+            raise OperationNotReadyError(f"{self.name} has not yet been run.")
+        with open(self._filename(tool), "r") as stream:
+            loaded = json.load(stream)
+        return {int(k): Path(v) for k, v in loaded.items()}
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        return self._adapted.expand(tool, exposure_id, found)
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        if self._filename(tool).exists():
+            found = self.find(tool)
+            print(f"{' '*indent}{self.name}: found {len(found)} exposures")
+        else:
+            print(f"{' '*indent}{self.name}: not started")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        found_as_strs = {str(k): str(v) for k, v in self._adapted.find(tool).items()}
+        with open(self._filename(tool), "w") as stream:
+            json.dump(found_as_strs, stream, indent=0)
+
+    def _filename(self, tool: RepoAdminTool) -> Path:
+        """Return the name of the file used to save the found exposures.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        filename : `Path`
+            The name of the file used to save the found exposures.
+        """
+        return tool.work_dir.joinpath(f"{self.name}.json")
+
+
+class _ApportionFoundExposuresAdapter(ExposureFinder):
+    """Adapter class for `ExposureFinder` that subselects a fixed fraction
+    of its found exposures.
+
+    Should only be constructed by calling `RawIngest.split_into`; the class
+    itself is an implementation detail.
+
+    Parameters
+    ----------
+    adapted : `ExposureFinder`
+        `ExposureFinder` instance to delegate to.
+    index : `int`
+        Which chunk this adapter will select.
+    count : `int`
+        Number of chunks to split found exposures into.
+    """
+
+    def __init__(self, adapted: ExposureFinder, index: int, count: int):
+        self._adapted = adapted
+        self._index = index
+        self._count = count
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        # Docstring inherited.
+        yield from self._adapted.flatten()
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        found = self._adapted.find(tool)
+        total = len(found)
+        size = math.ceil(total / self._count)
+        start = min(self._index*size, total)
+        stop = min(start + size, total)
+        return {exposure_id: found[exposure_id] for exposure_id in sorted(found.keys())[start: stop]}
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        return self._adapted.expand(tool, exposure_id, found)
+
+
+class IngestLogicError(Exception):
+    """Exception raised when the information reported by `RawIngestTask` on
+    success does not match what the `ExpsoureFinder` returned.
+
+    This exception is only raised after an ingest transaction has been
+    committed to the database, and hence it requires manual intervention if a
+    fix is necessary.
+    """
+    pass
+
+
+class _CheckRawIngestSuccess:
+    """A callable for use as the ``on_success`` parameter to `RawIngestTask`
+    as it is run by the `RawIngest` operation.
+    """
+
+    def __call__(self, fds: List[FileDataset]) -> None:
+        ingested_paths = set()
+        ingested_exposure_ids = set()
+        for fd in fds:
+            ingested_paths.add(Path(fd.path))
+            for ref in fd.refs:
+                ingested_exposure_ids.update(ref.dataId["exposure"] for ref in fd.refs)
+        if ingested_paths != self.paths:
+            raise IngestLogicError(f"Mismatch between ingested path(s) {ingested_paths - self.paths} "
+                                   f"and expected paths {self.paths - ingested_paths} for "
+                                   f"{self.exposure_id}.")
+        if ingested_exposure_ids != {self.exposure_id}:
+            bad = ingested_exposure_ids - {self.exposure_id}
+            raise IngestLogicError(f"File(s) thought to be for exposure={self.exposure_id} "
+                                   f"actually ingested as {bad}: {ingested_paths}.")
+
+    paths: Set[Path]
+    exposure_id: int
+
+
+class RawIngestGroup(Group):
+    """A custom `Group` that only holds `RawIngest` operations.
 
     Parameters
     ----------
     name : `str`
         Name of the operation.  Should include any parent-operation prefixes
         (see `AdminOperation` documentation).
-    find_files : `Callable`
-        A callable that takes a single `RepoAdminTool` argument and returns
-        a set of filenames to ingest.  This will be run during `prep`, saved
-        to a file in `RepoAdminTool.work_dir`, and used to drive actual ingest
-        in `run`.
-    task_class_name : `str`, optional
-        Fully-qualified path to the `RawIngestTask` subclass to use (defaults
-        to "lsst.obs.base.RawIngestTask" itself).  This is passed as a string
-        instead of a type or instance to defer imports (which can be very slow)
-        until they are actually needed, rather than include them in
-        `RepoDefinition` object instantiations.
-    collection : `str`, optional
-        Name of the `~lsst.daf.butler.CollectionType.RUN` collection that
-        datasets should be ingested into.  Default is to defer to the
-        `Instrument` class, which should be appropriate for all real-data
-        repositories, but not necessary those with simulated data (for which
-        more collections may be necessary to distinguish between simulation
-        versions).
+    children : `tuple` [ `RawIngest` ]
+        Child operation instances.
     """
-    def __init__(self, name: str, find_files: FindFilesFunction,
-                 task_class_name: str = "lsst.obs.base.RawIngestTask",
-                 collection: Optional[str] = None):
-        super().__init__(name)
-        self.find_files = find_files
-        self.task_class_name = task_class_name
-        self.collection = collection
 
-    CHUNK_SIZE = 10000
+    def __init__(self, name: str, children: Tuple[RawIngest, ...]):
+        super().__init__(name, children)
 
-    @staticmethod
-    def find_file_glob(top_template: str, pattern_template: str, follow_symlinks: bool = False
-                       ) -> FindFilesFunction:
-        """A function that recursively finds files according to a glob pattern
-        template, for use as the ``find_files`` construction argument.
+    children: Tuple[RawIngest, ...]
+
+    def save_found(self, suffix: str = "find") -> RawIngestGroup:
+        """Return a new `RawIngestGroup` by calling `RawIngest.save_found` on
+        all children.
+
+        This should be considered to consume ``self`` and the original child
+        operations within it, as the returned group will use the same names.
 
         Parameters
         ----------
-        top_template : `str`
-            Template string for the root directory to search.  Will be
-            processed via `str.format` with named ``repo`` (`RepoDefinition`)
-            and ``site`` (`SiteDefinition`) arguments to form the actual root
-            directory.
-        pattern_template : `str`
-            Template string for the filename-only glob pattern.  Will be
-            processed via `str.format` with named ``repo`` (`RepoDefinition`)
-            and ``site`` (`SiteDefinition`) arguments to form the actual
-            filename-only glob pattern.
-        follow_symlinks : `bool`, optional
-            If `True`, follow symlinks and resolve them into their true paths,
-            and user guarantees there are no cycles (no checking is performed).
-            If `False`, all symlinks are ignored.
+        suffix : `str`, optional
+            Suffix to add to child operation names (with a "-" separator) to
+            form the name of the operation that just saves the found exposures.
 
         Returns
         -------
-        files : `Set` [ `Path` ]
-            Set of full paths to the files to ingest.
+        adapted : `RawIngestGroup`
+            New `RawIngestGroup`.
         """
-        def wrapper(name: str, tool: RepoAdminTool) -> Set[Path]:
-            top = top_template.format(name=name, repo=tool.repo, site=tool.site)
-            pattern = pattern_template.format(name=name, repo=tool.repo, site=tool.site)
+        return RawIngestGroup(
+            self.name,
+            tuple(c.save_found(suffix) for c in self.children),
+        )
 
-            def recurse_into(path: str, progress: Progress) -> Iterator[Path]:
-                subdirs = []
-                for entry in progress.wrap(os.scandir(path), desc=f"Scanning {path}"):
-                    if entry.is_file(follow_symlinks=follow_symlinks):
-                        if fnmatch.fnmatchcase(entry.name, pattern):
-                            yield Path(entry.path if not follow_symlinks else os.path.realpath(entry.path))
-                    elif entry.is_dir(follow_symlinks=follow_symlinks):
-                        subdirs.append(entry.path if not follow_symlinks else os.path.realpath(entry.path))
-                    # Else case is deliberately ignored; possibilities are
-                    # entries that no longer exist (race conditions) and
-                    # symlinks when follow_symlinks is False.
-                for subdir in progress.wrap(subdirs, desc=f"Descending into subdirectories of {path}"):
-                    yield from recurse_into(subdir, progress.at(logging.DEBUG))
 
-            return set(recurse_into(top, tool.progress))
+class RawIngest(AdminOperation):
+    """A concrete `AdminOperation` that ingests raw images via
+    `lsst.obs.base.RawIngestTask`.
 
-        return wrapper
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    finder : `ExposureFinder`
+        Object responsible for finding the raw files to ingest.
+    instrument_name : `str`
+        Short/dimension name for the instrument whose raws are being ingested.
+    task_class_name : `str`, optional
+        Fully-qualified name of a `RawIngestTask` subclass to use; defaults
+        to `RawIngestTask` itself.
+    collection : `str`, optional
+        Name of the `~lsst.daf.butler.CollectionType.RUN` collection to ingest
+        raws into.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        finder: ExposureFinder,
+        instrument_name: str,
+        task_class_name: str = "lsst.obs.base.RawIngestTask",
+        collection: Optional[str] = None,
+    ):
+        super().__init__(name)
+        self._finder = finder
+        self._instrument_name = instrument_name
+        self.task_class_name = task_class_name
+        self.collection = collection
+
+    def split_into(self, n: int) -> RawIngestGroup:
+        """Split this operation into a group in which each child is responsible
+        for a fraction of the exposures found for the original.
+
+        This should be considered to consume ``self``, as the returned group
+        will perform the same work.
+
+        Parameters
+        ----------
+        n : `int`
+            Number of chunks to split into.
+
+        Returns
+        -------
+        group : `RawIngestGroup`
+            Group of equivalent operations.
+        """
+        return RawIngestGroup(
+            self.name,
+            tuple(
+                RawIngest(
+                    f"{self.name}-{i}",
+                    _ApportionFoundExposuresAdapter(self._finder, i, n),
+                    self._instrument_name,
+                    self.task_class_name,
+                    self.collection,
+                )
+                for i in range(n)
+            )
+        )
+
+    def save_found(self, suffix: str = "find") -> RawIngest:
+        """Return a new `RawIngest` operation that saves the ``dict`` of found
+        exposures (via a nested operation that must be run first).
+
+        This should be considered to consume ``self``, as the returned object
+        will use the same name.
+
+        Parameters
+        ----------
+        suffix : `str`, optional
+            Suffix to add to ``self.name`` (with a "-" separator) to form the
+            name of the operation that just saves the found exposures.
+
+        Returns
+        -------
+        adapted : `RawIngestGroup`
+            New `RawIngestGroup`.
+        """
+        return RawIngest(
+            self.name,
+            _SaveFoundExposuresAdapter(f"{self.name}-{suffix}", self._finder),
+            self._instrument_name,
+            self.task_class_name,
+            self.collection,
+        )
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        """Iterate over ``self`` and (then) any child operations.
+
+        Yields
+        ------
+        op : `AdminOperation`
+            Self or an operation nested within it.
+        """
+        yield from self._finder.flatten()
+        yield self
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
-        in_progress_filename = self._in_progress_filename(tool)
-        input_filename = self._input_filename(tool)
-        if os.path.exists(input_filename):
-            todo, done = self.read_files(tool)
-            if not todo:
-                print(f"{' '*indent}{self.name}: ingest done")
-            elif not done:
-                if os.path.exists(in_progress_filename):
-                    print(f"{' '*indent}{self.name}: ingest started and in progress")
-                else:
-                    print(f"{' '*indent}{self.name}: {len(todo)} files found, ready to ingest")
-            else:
-                print(f"{' '*indent}{self.name}: ingest in progress, "
-                      f"{len(todo)} to do, {len(done)} done")
+        found = self._finder.find(tool)
+        for child in self._finder.flatten():
+            child.print_status(tool, indent)
+        if found:
+            ingested = self.already_ingested(tool)
+            todo = found.keys() - ingested
+            print(f"{' '*indent}{self.name}: {len(todo)} exposures remaining")
         else:
-            print(f"{' '*indent}{self.name}: not started; prep needed")
-
-    def prep(self, tool: RepoAdminTool) -> None:
-        # Docstring inherited.
-        # Delegate to find_files and write the results to a temporary file.
-        input_filename = self._input_filename(tool)
-        tmp_filename = self._tmp_filename(tool)
-        with open(tmp_filename, "wt") as file:
-            file.writelines(
-                str(path) + "\n" for path in
-                tool.progress.wrap(
-                    sorted(self.find_files(self.name, tool)),
-                    desc=f"Writing {self.name} file list"
-                )
-            )
-            # If we didn't encounter any errors, rename the file to make it
-            # available to next steps.
-            os.replace(tmp_filename, input_filename)
+            print(f"{' '*indent}{self.name}: done")
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
         logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
         logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
-        in_progress_filename = self._in_progress_filename(tool)
-        completed_filename = self._completed_filename(tool)
-        if os.path.exists(in_progress_filename):
-            raise IncompleteOperationError(
-                f"{self.name} is either in progress in another process, or "
-                "has failed in an way that requires manual intervention; "
-                f"'{in_progress_filename}' lists files that were definitely "
-                "ingested, but others may have been ingested as well. "
-                "To continue, ensure all files actually ingested are listed "
-                f"in '{completed_filename}' and then delete "
-                f"'{in_progress_filename}'."
-            )
-        todo, done = self.read_files(tool)
-        if not todo:
+        found = self._finder.find(tool)
+        if not found:
             return
-        sorted_todo = sorted([str(path) for path in todo])
-        chunks = [sorted_todo[n: min(n + self.CHUNK_SIZE, len(sorted_todo))]
-                  for n in range(0, len(sorted_todo), self.CHUNK_SIZE)]
-        ingested = []
-        task = self.make_task(tool, on_success=ingested.extend)
-        if tool.dry_run:
-            # Need a for loop to invoke returned lazy iterator.
-            for chunk in tool.progress.wrap(chunks, desc=f"Ingesting in {self.CHUNK_SIZE}-file chunks"):
-                for _ in task.prep(chunk, processes=tool.jobs):
-                    pass
-        else:
-            file = open(self._in_progress_filename(tool), "wt")
+        ingested = self.already_ingested(tool)
+        todo = found.keys() - ingested
+        checker = _CheckRawIngestSuccess()
+        task = self.make_task(tool, on_success=checker)
+        for exposure_id in tool.progress.wrap(todo, desc="Ingesting exposures"):
+            paths = self._finder.expand(tool, exposure_id, found)
+            checker.paths = paths
+            checker.exposure_id = exposure_id
+            str_paths = [str(p) for p in paths]
             try:
-                file.flush()
-                for chunk in tool.progress.wrap(chunks, desc=f"Ingesting in {self.CHUNK_SIZE}-file chunks"):
-                    try:
-                        task.run(chunk, processes=tool.jobs, run=self.collection)
-                    except RuntimeError:
-                        continue
-            finally:
-                done.update(dataset.path for dataset in ingested)
-                file.writelines(str(line) + "\n" for line in sorted(done))
-                file.close()
-                os.replace(self._in_progress_filename(tool), self._completed_filename(tool))
+                if tool.dry_run:
+                    # Need a for loop to invoke returned lazy iterator.
+                    for _ in task.prep(str_paths, processes=tool.jobs):
+                        pass
+                else:
+                    task.run(str_paths, processes=tool.jobs, run=self.collection)
+            except IngestLogicError:
+                raise
+            except Exception:
+                continue
 
     @property
     def TaskClass(self) -> Type[RawIngestTask]:
         """Task class (`RawIngestTask` subclass) to run.
         """
         return doImport(self.task_class_name)
-
-    def _tmp_filename(self, tool: RepoAdminTool) -> Path:
-        """Filename used to save the to-do file list in `prep`, before it
-        finishes.
-        """
-        return tool.work_dir.joinpath(f"{self.name}_files.tmp.txt")
-
-    def _input_filename(self, tool: RepoAdminTool) -> Path:
-        """Filename used to save the to-do file list `prep`, when it has
-        finished.
-        """
-        return tool.work_dir.joinpath(f"{self.name}_files.txt")
-
-    def _in_progress_filename(self, tool: RepoAdminTool) -> Path:
-        """Filename used to save the completed file list in `run`, before it
-        finishes.
-        """
-        return tool.work_dir.joinpath(f"{self.name}_in_progress.txt")
-
-    def _completed_filename(self, tool: RepoAdminTool) -> Path:
-        """Filename used to save the completed file list in `run`, when it has
-        finished fully ingesting those files.
-        """
-        return tool.work_dir.joinpath(f"{self.name}_completed.txt")
 
     def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
         """Construct the `RawIngestTask` instance to use in `run`.
@@ -252,135 +575,22 @@ class RawIngest(AdminOperation):
         """
         config = self.TaskClass.ConfigClass()
         config.transfer = "direct"
+        config.failFast = True  # we do our own, per-exposure continue
         return self.TaskClass(config=config, butler=tool.butler, **kwargs)
 
-    def read_input_files(self, tool: RepoAdminTool) -> Set[Path]:
-        """Read the post-`prep` list of files to process.
-
-        This method requires input file to already exist, as it should
-        only be called in contexts where this is true.
+    def already_ingested(self, tool: RepoAdminTool):
+        """Return the set of all exposures (as integer IDs) that have already
+        been ingested for this instrument.
 
         Parameters
         ----------
         tool : `RepoAdminTool`
             Object managing shared state for all operations.
-
-        Returns
-        -------
-        paths : `set` [ `Path` ]
-            Set of full paths to all files that should be ingested, including
-            those already ingested.
         """
-        input_filename = self._input_filename(tool)
-        if not input_filename.exists():
-            raise OperationNotReadyError(f"{self.name} needs to be prepped first.")
-        with open(input_filename, "rt") as file:
-            paths = {Path(line.strip()) for line in file}
-        return paths
-
-    def read_done_files(self, tool: RepoAdminTool) -> Set[Path]:
-        """Read the post-`run` list of files fully ingested.
-
-        Parameters
-        ----------
-        tool : `RepoAdminTool`
-            Object managing shared state for all operations.
-
-        Returns
-        -------
-        done : `set` [ `Path` ]
-            Set of full paths to all files that have already been ingested.
-        """
-        completed_filename = self._completed_filename(tool)
-        done = set()
-        if completed_filename.exists():
-            with open(completed_filename, "rt") as file:
-                done.update(Path(line.strip()) for line in file)
-        return done
-
-    def read_files(self, tool: RepoAdminTool) -> Tuple[Set[Path], Set[Path]]:
-        """Read the post-`prep` list of files to do, and the post-`run` list
-        of files fully ingested, and return sets that contain what still
-        needs to be done and what has already been done.
-
-        Parameters
-        ----------
-        tool : `RepoAdminTool`
-            Object managing shared state for all operations.
-
-        Returns
-        -------
-        todo : `set` [ `Path` ]
-            Set of full paths to all files that still need to be ingested.
-        done : `set` [ `Path` ]
-            Set of full paths to all files that have already been ingested.
-        """
-        todo = self.read_input_files(tool)
-        done = self.read_done_files(tool)
-        todo -= done
-        return todo, done
-
-
-class DeduplicatingRawIngestGroup(Group):
-    """A special `Group` that ensures its `RawIngest` children do not try to
-    ingest the same raw dataset multiple times, by deduplicating in `prep`
-    on filenames.
-
-    The `prep` stages of all child operations must be run *in order*, but after
-    this is done the `run` stages may be run in any order.
-
-    This class can remove duplicates even after some files have been
-    ingested according to a non-deduplicated list.  It assumes filenames
-    are (alone) enough to uniquely identify raw files.
-
-    Parameters
-    ----------
-    name : `str`
-        Name of the operation.  Should include any parent-operation prefixes
-        (see `AdminOperation` documentation).
-    children : `tuple` [ `RawIngest` ]
-        Child ingest instances.
-    """
-    def __init__(self, name: str, children: Tuple[RawIngestTask, ...]):
-        super().__init__(name, children)
-        before = []
-        after = list(self.children)
-        for child in self.children:
-            del after[0]
-            child.find_files = self.remove_duplicates(tuple(before), tuple(after), child, child.find_files)
-            before.append(child)
-
-    children: Tuple[RawIngest, ...]
-
-    @staticmethod
-    def remove_duplicates(before: Tuple[RawIngest, ...], after: Tuple[RawIngest, ...], me: RawIngest,
-                          func: FindFilesFunction) -> FindFilesFunction:
-        """A callable for the ``find_files`` argument to `RawIngest` that
-        removes files found in any earlier sibling ingest `prep` stage, and any
-        files already ingested by any earlier or later sibling `run` stage.
-
-        This is automatically installed by the `DeduplicatingRawIngestGroup`
-        constructor.
-        """
-        def adapted(name: str, tool: RepoAdminTool) -> Set[Path]:
-            found_by_me_dict = {path.name: path for path in func(name, tool)}
-            done_by_me = {path.name for path in me.read_done_files(tool)}
-            tool.log.info("%s: found %d files, with %d done...", me.name,
-                          len(found_by_me_dict), len(done_by_me))
-            keep = set(found_by_me_dict.keys() | done_by_me)
-            for other_op in before:
-                found_by_other = {path.name for path in other_op.read_input_files(tool)}
-                already_taken = (found_by_other - done_by_me) & keep
-                tool.log.info("  %s: removing %d files also found by %s", me.name, len(already_taken),
-                              other_op.name)
-                keep -= already_taken
-            for other_op in after:
-                done_by_other = {path.name for path in other_op.read_done_files(tool)}
-                assert not done_by_other & done_by_me
-                already_taken = done_by_other & keep
-                tool.log.info("  %s: removing %d files already ingested by %s", me.name, len(already_taken),
-                              other_op.name)
-                keep -= already_taken
-            tool.log.info("  %s: kept %d files", me.name, len(keep))
-            return {found_by_me_dict[name] for name in keep}
-        return adapted
+        return {
+            data_id["exposure"]
+            for data_id in tool.butler.registry.queryDataIds(
+                "exposure",
+                instrument=self._instrument_name,
+            )
+        }

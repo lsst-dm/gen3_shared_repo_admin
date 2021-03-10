@@ -24,10 +24,11 @@ from __future__ import annotations
 __all__ = ("operations",)
 
 import os
-from typing import Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING
 
 from ._operation import SimpleStatus
-from .ingest import DeduplicatingRawIngestGroup, RawIngest
+from .ingest import RawIngest, ExposureFinder
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
 from .common import Group, RegisterInstrument, DefineChain
 from .visits import DefineVisits
@@ -36,7 +37,94 @@ if TYPE_CHECKING:
     from ._tool import RepoAdminTool
 
 
-def raw_ingest(subdir: str, top="/datasets/hsc/raw") -> RawIngest:
+class _ExposureFinder(ExposureFinder):
+    """An `ExposureFinder` implementation for HSC data (and possibly,
+    accidentally, the way some of it is organized at NCSA).
+
+    This finder  expects many exposures to be present in directories, and makes
+    no assumptions about how those directories are organized.  It does assume
+    that the filenames themselves are the original ``HSCA*.fits`` names,
+    allowing exposure IDs to be derived from those names.  Symbolic links are
+    never followed.
+
+    Parameters
+    ----------
+    root : `str`
+        Root path to search; subdirectories are searched recursively for
+        matching files.
+    allow_incomplete : `bool`, optional
+        If `True`, allow incomplete exposures that do not have a full
+        complement of detectors (including wavefront sensors, but not focus
+        sensors).  Default is `False`.
+    resolve_duplicates : `Callable`
+        A callable that takes two `Path` arguments and returns a new `Path`
+        (or `None`), to be invoked when the finder detects two directories
+        that each contain a raw from the same exposure (but not necessarily
+        the same one), indicating which is preferred.  The default always
+        returns `None`, which causes `RuntimeError` to be raised.
+    """
+
+    def __init__(self, root: Path, allow_incomplete: bool = False,
+                 resolve_duplicates: Callable[[Path, Path], Optional[Path]] = lambda a, b: None):
+        self._root = root
+        self._allow_incomplete = allow_incomplete
+        self._resolve_duplicates = resolve_duplicates
+
+    FILE_REGEX = r"HSCA(\d{8}).fits"
+
+    DETECTOR_NUMS_FOR_FILENAMES = (
+        list(range(0, 49)) + list(range(51, 58)) + list(range(100, 149)) + list(range(151, 158))
+    )
+    """HSC internal detector IDs used in filenames.
+    """
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        result = {}
+        for path, match in self.recursive_regex(tool, self._root, self.FILE_REGEX):
+            # HSC visit/exposure IDs are always even-numbered, to allow for
+            # more than 100 CCDs while otherwise using the same pattern as the
+            # old Supreme-Cam.  The CCD identifiers here aren't the
+            # pure-integer ones we prefer to use in the pipelines, so we ignore
+            # them entirely; we'll get those from metadata extraction during
+            # actualy ingest anyway.
+            exposure_id = int(match.group(1)) // 100
+            exposure_id -= exposure_id % 2
+            previous_path = result.setdefault(exposure_id, path.parent)
+            if previous_path != path.parent:
+                if (best_path := self._resolve_duplicates(previous_path, path.parent)) is not None:
+                    result[exposure_id] = best_path
+                else:
+                    raise RuntimeError(f"Found multiple directory paths ({previous_path}, {path.parent}) "
+                                       f"for exposure {exposure_id}.")
+        return result
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        base = found[exposure_id]
+        result = set()
+        for detector_num in self.DETECTOR_NUMS_FOR_FILENAMES:
+            path = base.joinpath(f"HSCA{exposure_id*100 + detector_num:08d}.fits")
+            if path.exists():
+                result.add(path)
+            elif not self._allow_incomplete:
+                raise FileNotFoundError(f"Missing raw {path} for {exposure_id}.")
+        return result
+
+
+def reject_domeflat_duplicates(a: Path, b: Path) -> Optional[Path]:
+    """Some HSC raw paths (at least at NCSA) have duplicates of some raws,
+    with some appearing in a 'domeflat' subdirectory.  This function selects
+    those that aren't in those subdirectories.
+    """
+    if "domeflat" in str(a):
+        return b
+    if "domeflat" in str(b):
+        return a
+    return None
+
+
+def raw_ingest(subdir: str, top: Path = Path("/datasets/hsc/raw"), **kwargs) -> RawIngest:
     """Helper function to generate a `RawIngest` appropriate for finding
     HSC raws (recursively) in a directory.
 
@@ -46,6 +134,9 @@ def raw_ingest(subdir: str, top="/datasets/hsc/raw") -> RawIngest:
         Subdirectory of ``top`` to search.  Also used as the operation name.
     top : `str`, optional
         Root directory for all raws for this instrument.
+    **kwargs
+        Additional keyword arguments forwarded to the exposure finder
+        constructor.
 
     Returns
     -------
@@ -53,12 +144,10 @@ def raw_ingest(subdir: str, top="/datasets/hsc/raw") -> RawIngest:
         A raw ingest operation.
     """
     return RawIngest(
-        name=f"HSC-raw-{subdir}",
-        find_files=RawIngest.find_file_glob(
-            top_template=os.path.join(top, subdir),
-            pattern_template="HSCA*.fits"
-        ),
-    )
+        f"HSC-raw-{subdir}",
+        _ExposureFinder(top.joinpath(subdir), **kwargs),
+        instrument_name="HSC",
+    ).save_found()
 
 
 class WriteStrayLightData(CalibrationOperation):
@@ -137,17 +226,15 @@ def operations() -> Group:
     return Group(
         "HSC", (
             RegisterInstrument("HSC-registration", "lsst.obs.subaru.HyperSuprimeCam"),
-            DeduplicatingRawIngestGroup(
-                "HSC-raw", tuple(
-                    raw_ingest(s) for s in (
-                        "commissioning",
-                        "cosmos",
-                        "newhorizons",
-                        "ssp_extra",
-                        "ssp_pdr1",
-                        "ssp_pdr2",
-                        "sxds-i2",
-                    )
+            Group(
+                "HSC-raw", (
+                    raw_ingest("commissioning"),
+                    raw_ingest("cosmos"),
+                    raw_ingest("newhorizons", resolve_duplicates=reject_domeflat_duplicates),
+                    raw_ingest("ssp_extra"),
+                    raw_ingest("ssp_pdr1"),
+                    raw_ingest("ssp_pdr2"),
+                    raw_ingest("sxds-i2"),
                 )
             ),
             Group(
