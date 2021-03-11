@@ -232,12 +232,16 @@ class DefineTag(AdminOperation):
         Iterable of ``(*args, **kwargs)`` pairs for
         `lsst.daf.butler.Registry.queryDatasets`, to use to obtain the datasets
         to associate into ``tagged``.
+    doc : `str`
+        Documentation string for this collection.
     """
 
-    def __init__(self, name: str, tagged: str, query_args: Iterable[Tuple[tuple, dict]]):
+    def __init__(self, name: str, tagged: str, query_args: Iterable[Tuple[tuple, dict]],
+                 doc: str):
         super().__init__(name)
         self.tagged = tagged
         self._query_args = tuple(query_args)
+        self.doc = doc
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
@@ -260,6 +264,7 @@ class DefineTag(AdminOperation):
         if not tool.dry_run:
             tool.butler.registry.registerCollection(self.tagged, CollectionType.TAGGED)
             tool.butler.registry.associate(self.tagged, refs)
+            tool.butler.registry.setCollectionDocumentation(self.tagged, self.doc)
 
     def cleanup(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
@@ -287,12 +292,15 @@ class DefineChain(AdminOperation):
         create.
     children : `tuple` [ `str` ]
         Names of the child collections.
+    doc : `str`
+        Documentation string for this collection.
     """
 
-    def __init__(self, name: str, chain: str, children: Tuple[str, ...]):
+    def __init__(self, name: str, chain: str, children: Tuple[str, ...], doc: str):
         super().__init__(name)
         self.chain = chain
         self.children = children
+        self.doc = doc
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
@@ -321,6 +329,7 @@ class DefineChain(AdminOperation):
         if not tool.dry_run:
             tool.butler.registry.registerCollection(self.chain, CollectionType.CHAINED)
             tool.butler.registry.setCollectionChain(self.chain, self.children)
+            tool.butler.registry.setCollectionDocumentation(self.chain, self.doc)
 
     def cleanup(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.

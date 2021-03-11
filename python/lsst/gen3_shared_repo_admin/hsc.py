@@ -32,6 +32,7 @@ from .ingest import RawIngest, ExposureFinder
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
 from .common import Group, RegisterInstrument, DefineChain
 from .visits import DefineVisits
+from . import doc_templates
 
 if TYPE_CHECKING:
     from ._tool import RepoAdminTool
@@ -242,12 +243,16 @@ def operations() -> Group:
                     WriteCuratedCalibrations("HSC-calibs-curated", "HSC", labels=("DM-28636",)),
                     convert_calibs("20180117"),
                     convert_calibs("20200115"),
-                    DefineChain("HSC-calibs-default", "HSC/calib", (
-                        "HSC/calib/gen2/20180117",
-                        "HSC/calib/DM-28636",
-                        "HSC/calib/gen2/20180117/unbounded",
-                        "HSC/calib/DM-28636/unbounded",
-                    )),
+                    DefineChain(
+                        "HSC-calibs-default",
+                        "HSC/calib", (
+                            "HSC/calib/gen2/20180117",
+                            "HSC/calib/DM-28636",
+                            "HSC/calib/gen2/20180117/unbounded",
+                            "HSC/calib/DM-28636/unbounded",
+                        ),
+                        doc=doc_templates.DEFAULT_CALIBS.format(instrument="HSC"),
+                    )
                 ),
             ),
             DefineVisits("HSC-visits", "HSC"),
