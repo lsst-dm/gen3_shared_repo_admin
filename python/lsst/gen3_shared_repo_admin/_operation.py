@@ -85,25 +85,6 @@ class AdminOperation(ABC):
         """
         raise NotImplementedError()
 
-    def prep(self, tool: RepoAdminTool) -> None:
-        """Scan existing files, databases, etc. to determine what this step
-        needs to do next, writing a description to ``tool.work_dir``.
-
-        Parameters
-        ----------
-        tool : `RepoAdminTool`
-            Object managing shared state for all operations.
-
-        Notes
-        -----
-        This should never modify the output data repository, and may be invoked
-        even in dry-run conditions (with ``tool.butler`` read-only).  It should
-        generally do as much work as possible under these conditions.
-
-        The default implementation of this method does nothing.
-        """
-        pass
-
     @abstractmethod
     def run(self, tool: RepoAdminTool) -> None:
         """Run this operation, modifying the data repository.

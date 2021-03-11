@@ -76,26 +76,21 @@ class ConsoleProgressHandler(ProgressHandler):
               envvar="LSST_BUTLER_ADMIN_WORK_ROOT")
 @click.option("-n", "--dry-run", is_flag=True)
 @click.option("-j", "--jobs", type=int, default=1)
-@click.option("--prep", is_flag=True)
 @click.option("--status", is_flag=True)
 @click.option("--cleanup", is_flag=True)
 def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: str, dry_run: bool,
-        jobs: int, prep: bool, status: bool, cleanup: bool):
+        jobs: int, status: bool, cleanup: bool):
     lsst.log.configure_prop(_LOG_PROP.format(log_file=f"{work_root}/{repo}_{date}.log"))
     python_logger = logging.getLogger()
     python_logger.setLevel(logging.INFO)
     python_logger.addHandler(lsst.log.LogHandler())
     Progress.set_handler(ConsoleProgressHandler())
-    dry_run = dry_run or prep or status
+    dry_run = dry_run or status
     tool = RepoAdminTool.from_strings(repo, date=date, site=site, work_root=work_root, dry_run=dry_run,
                                       jobs=jobs)
     if status:
-        assert not prep
         assert not cleanup
         tool.status(name)
-    elif prep:
-        assert not cleanup
-        tool.prep(name)
     elif cleanup:
         tool.cleanup(name)
     else:

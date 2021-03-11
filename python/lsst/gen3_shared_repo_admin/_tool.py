@@ -132,20 +132,6 @@ class RepoAdminTool:
             name = self.repo.name
         self.operations[name].print_status(self, indent=0)
 
-    def prep(self, name: str) -> None:
-        """Prepare the named operation, performing only steps that do not
-        require modifying the data repository.
-
-        Parameters
-        ----------
-        name : `str`
-            Name of the operation.
-        """
-        if name is None:
-            name = self.repo.name
-        self.log.info("Preparing %s in %s.", name, self.root)
-        self.operations[name].prep(self)
-
     def run(self, name: str) -> None:
         """Run the named operation.
 
@@ -153,11 +139,6 @@ class RepoAdminTool:
         ----------
         name : `str`
             Name of the operation.
-
-        Notes
-        -----
-        Whether an operation requires `prep` to be invoked before `run` depends
-        on the operation, but should is always reported by `status`.
         """
         if name is None:
             name = self.repo.name
