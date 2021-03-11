@@ -36,6 +36,7 @@ from . import hsc
 from . import rubin
 from . import refcats
 from . import dc2
+from . import visits
 
 
 # Template repo definitions that don't include dates, for things that don't
@@ -82,6 +83,8 @@ DC2 = RepoDefinition(
         common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim"),
         dc2.raw_operations(),
         dc2.refcat_operations(),
+        dc2.calib_operations(),
+        visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",)),
     ),
 )
 

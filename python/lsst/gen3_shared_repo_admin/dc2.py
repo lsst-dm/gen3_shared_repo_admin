@@ -27,9 +27,11 @@ import os
 from pathlib import Path
 from typing import Dict, Set, TYPE_CHECKING
 
-from .common import Group
+from .calibs import WriteCuratedCalibrations
+from .common import DefineChain, Group
 from .ingest import DefineRawTag, ExposureFinder, RawIngest
 from .refcats import RefCatIngest
+from . import doc_templates
 
 if TYPE_CHECKING:
     from ._tool import RepoAdminTool
@@ -143,5 +145,30 @@ def refcat_operations() -> Group:
                 path=Path("/datasets/DC2/DR6/Run2.2i/patched/2021-02-10/ref_cats/cal_ref_cat"),
                 collection="refcats/DM-28636",
             ),
+        )
+    )
+
+
+def calib_operations() -> Group:
+    """Helper function that returns all calibration ingest admin operations for
+    the DC2 data repository.
+
+    Returns
+    -------
+    group : `Group`
+        A group of admin operations.
+    """
+    return Group(
+        "2.2i-calibs", (
+            WriteCuratedCalibrations("2.2i-calibs-curated", "LSSTCam-imSim", labels=("PREOPS-301",),
+                                     collection_prefix="2.2i"),
+            DefineChain(
+                "2.2i-calibs-default",
+                "2.2i/calib", (
+                    "2.2i/calib/PREOPS-301",
+                    "2.2i/calib/PREOPS-301/unbounded",
+                ),
+                doc=doc_templates.DEFAULT_CALIBS.format(instrument="Run2.2i"),
+            )
         )
     )

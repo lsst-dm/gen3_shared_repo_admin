@@ -48,15 +48,20 @@ class CalibrationOperation(AdminOperation):
         Short (dimension) name of the instrument.
     labels : `tuple` [ `str` ]
         Tuple of strings to include in the collection name(s).
+    collection_prefix : `str`, optional
+        Collection name prefix to use instead of the instrument name.
     """
-    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...]):
+    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...],
+                 collection_prefix: Optional[str] = None):
         super().__init__(name)
         self.instrument_name = instrument_name
         self.labels = labels
+        self.collection_prefix = collection_prefix
 
     def instrument(self, tool: RepoAdminTool) -> Instrument:
         from lsst.obs.base import Instrument
-        return Instrument.fromName(self.instrument_name, tool.butler.registry)
+        return Instrument.fromName(self.instrument_name, tool.butler.registry,
+                                   collection_prefix=self.collection_prefix)
 
     def collection(self, tool: RepoAdminTool, *, instrument: Optional[Instrument] = None) -> str:
         if instrument is None:
