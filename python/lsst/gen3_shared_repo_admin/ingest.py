@@ -651,26 +651,16 @@ class DefineRawTag(AdminOperation):
         # Docstring inherited.
         from lsst.daf.butler.registry import MissingCollectionError
         try:
-            ingested = self.query(tool)
+            tool.butler.registry.getCollectionType(self.input_collection)
         except MissingCollectionError:
             print(f"{' '*indent}{self.name}: blocked; input collection does not exist")
             return
         try:
-            associated = set(tool.butler.registry.queryDatasets("raw", collections=[self.output_collection],
-                                                                instrument=self._instrument_name))
+            tool.butler.registry.getCollectionType(self.output_collection)
         except MissingCollectionError:
-            print(f"{' '*indent}{self.name}: not started; {len(ingested)} datasets to associate")
+            print(f"{' '*indent}{self.name}: not started")
             return
-        todo = ingested - associated
-        extra = associated - ingested
-        if extra:
-            print(f"{' '*indent}{self.name}: error; {len(extra)} unexpected "
-                  f"datasets in {self.output_collection}")
-        elif todo:
-            print(f"{' '*indent}{self.name}: incomplete; {len(todo)} datasets "
-                  f"remaining (of {len(ingested)} ingested)")
-        else:
-            print(f"{' '*indent}{self.name}: done; {len(associated)} datasets associated")
+        print(f"{' '*indent}{self.name}: done (or possibly interrupted; output collection exists)")
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
