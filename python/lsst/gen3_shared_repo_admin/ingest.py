@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "DefineRawTag",
     "ExposureFinder",
     "IngestLogicError",
     "RawIngest",
@@ -55,7 +56,7 @@ from ._operation import AdminOperation, OperationNotReadyError
 from .common import Group
 
 if TYPE_CHECKING:
-    from lsst.daf.butler import FileDataset, Progress
+    from lsst.daf.butler import DatasetRef, FileDataset, Progress
     from lsst.obs.base import RawIngestTask
     from ._tool import RepoAdminTool
 
@@ -444,7 +445,7 @@ class RawIngest(AdminOperation):
         collection: Optional[str] = None,
     ):
         super().__init__(name)
-        self._finder = finder
+        self.finder = finder
         self._instrument_name = instrument_name
         self.task_class_name = task_class_name
         self.collection = collection
@@ -471,7 +472,7 @@ class RawIngest(AdminOperation):
             tuple(
                 RawIngest(
                     f"{self.name}-{i}",
-                    _ApportionFoundExposuresAdapter(self._finder, i, n),
+                    _ApportionFoundExposuresAdapter(self.finder, i, n),
                     self._instrument_name,
                     self.task_class_name,
                     self.collection,
@@ -500,7 +501,7 @@ class RawIngest(AdminOperation):
         """
         return RawIngest(
             self.name,
-            _SaveFoundExposuresAdapter(f"{self.name}-{suffix}", self._finder),
+            _SaveFoundExposuresAdapter(f"{self.name}-{suffix}", self.finder),
             self._instrument_name,
             self.task_class_name,
             self.collection,
@@ -514,13 +515,13 @@ class RawIngest(AdminOperation):
         op : `AdminOperation`
             Self or an operation nested within it.
         """
-        yield from self._finder.flatten()
+        yield from self.finder.flatten()
         yield self
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
-        found = self._finder.find(tool)
-        for child in self._finder.flatten():
+        found = self.finder.find(tool)
+        for child in self.finder.flatten():
             child.print_status(tool, indent)
         if found:
             ingested = self.already_ingested(tool)
@@ -533,7 +534,7 @@ class RawIngest(AdminOperation):
         # Docstring inherited.
         logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
         logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
-        found = self._finder.find(tool)
+        found = self.finder.find(tool)
         if not found:
             return
         ingested = self.already_ingested(tool)
@@ -541,7 +542,7 @@ class RawIngest(AdminOperation):
         checker = _CheckRawIngestSuccess()
         task = self.make_task(tool, on_success=checker)
         for exposure_id in tool.progress.wrap(todo, desc="Ingesting exposures"):
-            paths = self._finder.expand(tool, exposure_id, found)
+            paths = self.finder.expand(tool, exposure_id, found)
             checker.paths = paths
             checker.exposure_id = exposure_id
             str_paths = [str(p) for p in paths]
@@ -594,3 +595,118 @@ class RawIngest(AdminOperation):
                 instrument=self._instrument_name,
             )
         }
+
+
+class DefineRawTag(AdminOperation):
+    """A concrete `AdminOperation` that defines a ``TAGGED`` collection
+    containing all raws ingested via a particular `ExposureFinder`.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    finder : `ExposureFinder`
+        Object responsible for finding the raw files that were ingested.
+    instrument_name : `str`
+        Short/dimension name for the instrument whose raws are being ingested.
+    input_collection : `str`
+        Name of the collection that all raws were ingested into.  All raws in
+        this collection with exposures found by ``finder`` will be tagged.
+    output_collection : `str`
+        Name of the new ``TAGGED`` collection.
+    doc : `str`
+        Documentation string for the new collection.
+    """
+
+    def __init__(self, name: str, finder: ExposureFinder, instrument_name: str,
+                 input_collection: str, output_collection: str, doc: str):
+        super().__init__(name)
+        self.finder = finder
+        self._instrument_name = instrument_name
+        self.input_collection = input_collection
+        self.output_collection = output_collection
+        self.doc = doc
+
+    QUERY_N_EXPOSURES = 100
+    """Number of exposures to query for at once.
+
+    We can't query for them all at once because we have to stuff them into
+    one ``WHERE exposure IN (a, b, c, d, ...)`` expression, but querying
+    one exposure at a time is latency-limited.
+    """
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        """Iterate over ``self`` and (then) any child operations.
+
+        Yields
+        ------
+        op : `AdminOperation`
+            Self or an operation nested within it.
+        """
+        yield from self.finder.flatten()
+        yield self
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler.registry import MissingCollectionError
+        try:
+            ingested = self.query(tool)
+        except MissingCollectionError:
+            print(f"{' '*indent}{self.name}: blocked; input collection does not exist")
+            return
+        try:
+            associated = set(tool.butler.registry.queryDatasets("raw", collections=[self.output_collection],
+                                                                instrument=self._instrument_name))
+        except MissingCollectionError:
+            print(f"{' '*indent}{self.name}: not started; {len(ingested)} datasets to associate")
+            return
+        todo = ingested - associated
+        extra = associated - ingested
+        if extra:
+            print(f"{' '*indent}{self.name}: error; {len(extra)} unexpected "
+                  f"datasets in {self.output_collection}")
+        elif todo:
+            print(f"{' '*indent}{self.name}: incomplete; {len(todo)} datasets "
+                  f"remaining (of {len(ingested)} ingested)")
+        else:
+            print(f"{' '*indent}{self.name}: done; {len(associated)} datasets associated")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        from lsst.daf.butler import CollectionType
+        refs = self.query(tool)
+        if not tool.dry_run:
+            tool.butler.registry.registerCollection(self.output_collection, CollectionType.TAGGED)
+            tool.butler.registry.associate(self.output_collection, refs)
+            tool.butler.registry.setCollectionDocumentation(self.output_collection, self.doc)
+
+    def query(self, tool: RepoAdminTool) -> Set[DatasetRef]:
+        """Query for datasets to tag.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        refs : `set` [ `DatasetRef` ]
+            References to the datasets to tag.
+        """
+        found = list(self.finder.find(tool))
+        refs = set()
+        with tool.progress.bar(desc="Querying for ingested raws", total=len(found)) as progress_bar:
+            for n in range(0, len(found), self.QUERY_N_EXPOSURES):
+                start = n
+                stop = min(n + self.QUERY_N_EXPOSURES, len(found))
+                where = "exposure IN (" + ", ".join(str(id) for id in found[start: stop]) + ")"
+                refs.update(
+                    tool.butler.registry.queryDatasets(
+                        "raw", collections=[self.input_collection],
+                        instrument=self._instrument_name,
+                        where=where,
+                    )
+                )
+                progress_bar.update(stop - start)
+        return refs

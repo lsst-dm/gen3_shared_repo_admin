@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, Set, TYPE_CHECKING
 
 from .common import Group
-from .ingest import ExposureFinder, RawIngest
+from .ingest import DefineRawTag, ExposureFinder, RawIngest
 from .refcats import RefCatIngest
 
 if TYPE_CHECKING:
@@ -81,28 +81,46 @@ def raw_operations() -> Group:
     group : `Group`
         A group of admin operations.
     """
+    dr6_finder = _ExposureFinder(
+        "/datasets/DC2/DR6/Run2.2i/patched/2021-02-10/raw",
+        "*-R??-S??-det???-???.fits",
+    ).saved_as("2.2i-raw-DR6-find")
+    monthly_finder = _ExposureFinder(
+        "/datasets/DC2/repoRun2.2i/raw",
+        "*-R??-S??-det???.fits",
+    )
     return Group(
         "2.2i", (
             Group(
                 "2.2i-raw", (
                     RawIngest(
                         "2.2i-raw-DR6",
-                        _ExposureFinder(
-                            "/datasets/DC2/DR6/Run2.2i/patched/2021-02-10/raw",
-                            "*-R??-S??-det???-???.fits",
-                        ),
+                        dr6_finder,
                         instrument_name="LSSTCam-imSim",
                         collection="2.2i/raw/all",
                     ).split_into(4).save_found(),
                     RawIngest(
                         "2.2i-raw-monthly",
-                        _ExposureFinder(
-                            "/datasets/DC2/repoRun2.2i/raw",
-                            "*-R??-S??-det???.fits",
-                        ),
+                        monthly_finder,
                         instrument_name="LSSTCam-imSim",
                         collection="2.2i/raw/all",
                     ).save_found(),
+                    DefineRawTag(
+                        "2.2i-raw-tag-DP0",
+                        dr6_finder,
+                        instrument_name="LSSTCam-imSim",
+                        input_collection="2.2i/raw/all",
+                        output_collection="2.2i/raw/DP0",
+                        doc="ImSim raw images designated for use in Data Preview 0.",
+                    ),
+                    DefineRawTag(
+                        "2.2i-raw-tag-med",
+                        monthly_finder,
+                        instrument_name="LSSTCam-imSim",
+                        input_collection="2.2i/raw/all",
+                        output_collection="2.2i/raw/test-med-1",
+                        doc="ImSim raw images used as inputs for DM's medium-scale regular test processing.",
+                    ),
                 ),
             ),
         )
