@@ -23,10 +23,23 @@ from __future__ import annotations
 
 ___all__ = (
     "DEFAULT_CALIBS",
+    "UMBRELLA",
 )
 
+import textwrap
 
-DEFAULT_CALIBS = """
+
+class WrappedStringTemplate:
+
+    def __init__(self, template: str):
+        self._template = template
+
+    def format(self, **kwargs: str) -> str:
+        paragraphs = self._template.format(**kwargs).split("\n\n")
+        return "\n\n".join(textwrap.fill(p) for p in paragraphs)
+
+
+DEFAULT_CALIBS = WrappedStringTemplate("""\
 Default calibration datasets for {instrument} processing.
 
 This collection should be updated as needed to point to the current best
@@ -36,4 +49,9 @@ infinite), followed by zero or more non-`CALIBRATION` collections holding only
 unbounded calibrations - those whose validity ranges can be safely assumed by
 pipeline code to be infinite (possibly because the actual validity lookup is
 internal to the dataset.
-"""
+""")
+
+UMBRELLA = WrappedStringTemplate("""\
+Convenience collection that points to the recommended versions of most standard
+processing input collections, for {tail}.
+""")

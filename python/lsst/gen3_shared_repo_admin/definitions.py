@@ -63,6 +63,13 @@ MAIN = RepoDefinition(
                     "ps1_pv3_3pi_20170110",
                     "sdss-dr9-fink-v5b",
                 )
+            ) + (
+                common.DefineChain(
+                    "refcats-chain",
+                    "refcats",
+                    ("refcats/DM-28636",),
+                    doc="Umbrella collection for all active reference catalogs.",
+                ),
             )
         ),
         hsc.operations(),
