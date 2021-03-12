@@ -79,8 +79,10 @@ class DefineVisits(AdminOperation):
             else:
                 print(f"{' '*indent}{self.name}: not started; {len(todo)} exposures found")
         else:
-            assert not n_done
-            print(f"{' '*indent}{self.name}: {n_done} visits defined")
+            if not n_done:
+                print(f"{' '*indent}{self.name}: not started, and nothing to do (yet?)")
+            else:
+                print(f"{' '*indent}{self.name}: {n_done} visits defined")
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
