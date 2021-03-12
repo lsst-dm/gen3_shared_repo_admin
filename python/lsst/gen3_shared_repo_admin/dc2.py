@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-__all__ = ("raw_operations", "refcat_operations")
+__all__ = ("raw_operations", "refcat_operations", "umbrella_operations", "calib_operations")
 
 import os
 from pathlib import Path
@@ -113,7 +113,7 @@ def raw_operations() -> Group:
                         instrument_name="LSSTCam-imSim",
                         input_collection="2.2i/raw/all",
                         output_collection="2.2i/raw/DP0",
-                        doc="ImSim raw images designated for use in Data Preview 0.",
+                        doc="Raw images from DR6 WFD designated for use in Data Preview 0.",
                     ),
                     DefineRawTag(
                         "2.2i-raw-tag-med",
@@ -121,8 +121,58 @@ def raw_operations() -> Group:
                         instrument_name="LSSTCam-imSim",
                         input_collection="2.2i/raw/all",
                         output_collection="2.2i/raw/test-med-1",
-                        doc="ImSim raw images used as inputs for DM's medium-scale regular test processing.",
+                        doc="Raw images used as inputs for DM's medium-scale regular test processing.",
                     ),
+                ),
+            ),
+        )
+    )
+
+
+def umbrella_operations() -> Group:
+    """Helper function that returns all umbrella-collection defintion admin
+    operations for the DC2 data repository.
+
+    Returns
+    -------
+    group : `Group`
+        A group of admin operations.
+    """
+    return Group(
+        "2.2i-defaults",
+        (
+            DefineChain(
+                "2.2i-defaults-alll",
+                "2.2i/defaults", (
+                    "2.2i/raw/all",
+                    "2.2i/calib",
+                    "skymaps",
+                    "refcats",
+                ),
+                doc=doc_templates.UMBRELLA.format(tail="all available DC2 run2.2i data."),
+            ),
+            DefineChain(
+                "2.2i-defaults-DR6",
+                "2.2i/defaults/DP0", (
+                    "2.2i/raw/DP0",
+                    "2.2i/calib",
+                    "skymaps",
+                    "refcats",
+                ),
+                doc=doc_templates.UMBRELLA.format(
+                    tail="the DC2 DR6 WFD subset designated for Data Preview 0."
+                ),
+            ),
+            DefineChain(
+                "2.2i-defaults-monthly",
+                "2.2i/defaults/test-med-1", (
+                    "2.2i/raw/test-med-1",
+                    "2.2i/calib",
+                    "skymaps",
+                    "refcats",
+                ),
+                doc=doc_templates.UMBRELLA.format(
+                    tail="the DC2 subset used for DM's medium-scale regular test processing."
                 ),
             ),
         )
