@@ -143,7 +143,13 @@ def refcat_operations() -> Group:
             RefCatIngest(
                 "cal_ref_cat_2_2",
                 path=Path("/datasets/DC2/DR6/Run2.2i/patched/2021-02-10/ref_cats/cal_ref_cat"),
-                collection="refcats/DM-28636",
+                collection="refcats/PREOPS-301",
+            ),
+            DefineChain(
+                "refcats-chain",
+                "refcats",
+                ("refcats/PREOPS-301",),
+                doc="Umbrella collection for all active reference catalogs.",
             ),
         )
     )
