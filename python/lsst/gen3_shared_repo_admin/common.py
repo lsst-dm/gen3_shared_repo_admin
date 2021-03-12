@@ -274,7 +274,7 @@ class DefineTag(AdminOperation):
     def _query(self, tool: RepoAdminTool) -> Iterator[DatasetRef]:
         """Iterate over all datasets to tag,
         """
-        for args, kwargs in self._query_args:
+        for args, kwargs in tool.progress.wrap(self._query_args, desc=f"Querying for {self.tagged} datasets"):
             yield from tool.butler.registry.queryDatasets(*args, **kwargs)
 
 
