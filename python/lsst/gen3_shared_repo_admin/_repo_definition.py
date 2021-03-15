@@ -21,56 +21,13 @@
 
 from __future__ import annotations
 
-__all__ = ("SiteDefinition", "RepoDefinition")
+__all__ = ("RepoDefinition",)
 
 import dataclasses
 from typing import Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ._operation import AdminOperation
-
-
-@dataclasses.dataclass
-class SiteDefinition:
-    """Struct that defines URI templates for a particular compute center or
-    data facility.
-
-    Notes
-    -----
-    The separation between `SiteDefinition` and `RepoDefinition` regarding what
-    is actually site-specific is not great; `SiteDefinition` just contains
-    things that are pretty clearly necessary for *all* sites to define, with
-    exactly the same structure, while `RepoDefinition` instances often include
-    `AdminOperation` lists that really are quite site-specific in practice.
-    At present, it just isn't worth the effort to try to fix this, especially
-    with only one concrete site to use as an example.
-    """
-
-    name: str
-    """Unique name for the site.
-    """
-
-    repo_uri_template: str
-    """Template for the root repo URI.
-
-    This will be processed with `str.format`, passing a single named ``repo``
-    argument (a `RepoDefinition` instance).
-    """
-
-    db_namespace_template: str
-    """Template for the Registry database's ``namespace`` configuration option
-    (i.e. schema name).
-
-    This will be processed with `str.format`, passing a single named ``repo``
-    argument (a `RepoDefinition` instance).
-    """
-
-    db_uri_template: str
-    """Template for the Registry database's connection URI.
-
-    This will be processed with `str.format`, passing a single named ``repo``
-    argument (a `RepoDefinition` instance).
-    """
 
 
 @dataclasses.dataclass

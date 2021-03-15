@@ -30,7 +30,8 @@ from pathlib import Path
 # (especially compared to expected command-line responsivity for things like
 # checking status).
 
-from ._dataclasses import RepoDefinition, SiteDefinition
+from ._repo_definition import RepoDefinition
+from ._site_definition import SiteDefinition
 from . import common
 from . import hsc
 from . import rubin

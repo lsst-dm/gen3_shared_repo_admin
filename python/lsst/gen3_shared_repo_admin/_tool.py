@@ -26,11 +26,14 @@ __all__ = ("RepoAdminTool",)
 import logging
 from pathlib import Path
 
-from lsst.daf.butler import Butler, Progress
+from lsst.daf.butler import Butler, Progress, TYPE_CHECKING
 
-from ._dataclasses import RepoDefinition, SiteDefinition
 from ._operation import OperationNotReadyError
 from .definitions import REPOS, SITES
+
+if TYPE_CHECKING:
+    from ._repo_definition import RepoDefinition
+    from ._site_definition import SiteDefinition
 
 
 class RepoAdminTool:
