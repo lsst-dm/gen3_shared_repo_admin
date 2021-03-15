@@ -27,6 +27,7 @@ from collections import defaultdict
 import logging
 import os
 from pathlib import Path
+import textwrap
 from typing import Callable, Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING
 
 from ._operation import AdminOperation, OperationNotReadyError, SimpleStatus
@@ -34,6 +35,7 @@ from .ingest import RawIngest, ExposureFinder
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
 from .common import Group, RegisterInstrument, DefineChain, DefineTag
 from .visits import DefineVisits
+from .reruns import ConvertRerun
 from . import doc_templates
 
 if TYPE_CHECKING:
@@ -450,6 +452,54 @@ def rc2_tags() -> Group:
     )
 
 
+def rc2_rerun(weekly: str, ticket: str, steps: Dict[str, str]) -> Group:
+    """Helper function that returns operations that convert a single logical
+    Gen2 RC2 reprocessing rerun, assuming its child reruns form a consistent
+    pattern.
+
+    Parameters
+    ----------
+    weekly : `str`
+        Weekly tag string (e.g. ``w_2021_06``).
+    ticket : `str`
+        Ticket number for the processing run.
+    steps : `dict`
+        Dictionary mapping child rerun suffixes (e.g. ``"-sfm"`` or ``""``)
+        to the names used for Gen3 ``RUN`` collections and operation names.
+
+    Returns
+    -------
+    group : `Group`
+        A group of admin operations.
+    """
+    reruns = tuple(
+        ConvertRerun(
+            f"HSC-rerun-RC2-{weekly}-{v}",
+            instrument_name="HSC",
+            root="/datasets/hsc/repo",
+            repo_path=f"rerun/RC/{weekly}/{ticket}{k}",
+            run_name=f"HSC/runs/RC2/{weekly}/{ticket}/{v}",
+            include=("*",),
+            exclude=("*_metadata", "raw", "brightObjectMask", "ref_cat"),
+        )
+        for k, v in steps.items()
+    )
+    chain = DefineChain(
+        f"HSC-rerun-RC2-{weekly}-chain",
+        f"HSC/runs/RC2/{weekly}/{ticket}",
+        (
+            tuple(f"HSC/runs/RC2/{weekly}/{ticket}/{v}" for v in reversed(steps.values()))
+            + ("HSC/raw/RC2", "HSC/calib", "HSC/masks", "skymaps", "refcats")
+        ),
+        doc=textwrap.fill(
+            f"HSC RC2 processing with weekly {weekly} on ticket {ticket}, "
+            "(converted from Gen2 repo at /datasets/hsc/repo).",
+        ),
+        flatten=True,
+    )
+    return Group(f"HSC-rerun-RC2-{weekly}", reruns + (chain,))
+
+
 def operations() -> Group:
     """Helper function that returns all HSC-specific operations.
 
@@ -526,6 +576,15 @@ def operations() -> Group:
                     "HSC/raw/RC2", "HSC/calib", "HSC/masks", "refcats", "skymaps",
                 ),
                 doc=doc_templates.UMBRELLA.format(tail="the HSC RC2 test dataset.")
+            ),
+            Group(
+                "HSC-rerun",
+                (
+                    rc2_rerun("w_2021_06", "DM-28654", {"-sfm": "sfm", "": "rest"}),
+                    rc2_rerun("w_2021_02", "DM-28282", {"-sfm": "sfm", "": "rest"}),
+                    rc2_rerun("w_2020_50", "DM-28140", {"-sfm": "sfm", "": "rest"}),
+                    rc2_rerun("w_2020_42", "DM-27244", {"-sfm": "sfm", "": "rest"}),
+                )
             ),
         )
     )
