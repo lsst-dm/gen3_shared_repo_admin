@@ -294,13 +294,17 @@ class DefineChain(AdminOperation):
         Names of the child collections.
     doc : `str`
         Documentation string for this collection.
+    flatten : `bool`, optional
+        If `True`, recursively flatten any chains in ``children`` before
+        defining the chain.
     """
 
-    def __init__(self, name: str, chain: str, children: Tuple[str, ...], doc: str):
+    def __init__(self, name: str, chain: str, children: Tuple[str, ...], doc: str, flatten: bool = False):
         super().__init__(name)
         self.chain = chain
         self.children = children
         self.doc = doc
+        self._flatten = flatten
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
@@ -309,16 +313,18 @@ class DefineChain(AdminOperation):
             children = tool.butler.registry.getCollectionChain(self.chain)
         except MissingCollectionError:
             try:
-                c = set(tool.butler.registry.queryCollections(self.children))
+                c = set(tool.butler.registry.queryCollections(self.children, flattenChains=self._flatten))
             except MissingCollectionError:
                 print(f"{' '*indent}{self.name}: blocked; some child collections do not exist")
                 return
-            if c == set(self.children):
-                print(f"{' '*indent}{self.name}: ready to run")
-            else:
-                print(f"{' '*indent}{self.name}: blocked; child collection(s): {set(self.children) - c}")
+            print(f"{' '*indent}{self.name}: ready to run")
         else:
-            if tuple(children) == self.children:
+            try:
+                c = tuple(tool.butler.registry.queryCollections(self.children, flattenChains=self._flatten))
+            except MissingCollectionError:
+                print(f"{' '*indent}{self.name}: blocked; some child collections do not exist")
+                return
+            if tuple(children) == c:
                 print(f"{' '*indent}{self.name}: done")
             else:
                 print(f"{' '*indent}{self.name}: definition changed; run again")
@@ -328,7 +334,7 @@ class DefineChain(AdminOperation):
         from lsst.daf.butler import CollectionType
         if not tool.dry_run:
             tool.butler.registry.registerCollection(self.chain, CollectionType.CHAINED)
-            tool.butler.registry.setCollectionChain(self.chain, self.children)
+            tool.butler.registry.setCollectionChain(self.chain, self.children, flatten=self._flatten)
             tool.butler.registry.setCollectionDocumentation(self.chain, self.doc)
 
     def cleanup(self, tool: RepoAdminTool) -> None:
