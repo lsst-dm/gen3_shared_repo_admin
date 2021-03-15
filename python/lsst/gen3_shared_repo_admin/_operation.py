@@ -205,15 +205,18 @@ class SimpleStatus(enum.Enum):
         context : `ContextManager`
             Context manager with no interface of its own.
         """
-        in_progress = cls.IN_PROGRESS.filename(op, tool)
-        in_progress.touch(exist_ok=True)
-        try:
-            yield
-        except BaseException:
-            in_progress.replace(cls.INTERRUPTED.filename(op, tool))
-            raise
+        if not tool.dry_run:
+            in_progress = cls.IN_PROGRESS.filename(op, tool)
+            in_progress.touch(exist_ok=True)
+            try:
+                yield
+            except BaseException:
+                in_progress.replace(cls.INTERRUPTED.filename(op, tool))
+                raise
+            else:
+                in_progress.replace(cls.DONE.filename(op, tool))
         else:
-            in_progress.replace(cls.DONE.filename(op, tool))
+            yield
 
     @classmethod
     def cleanup(cls, op: AdminOperation, tool: RepoAdminTool) -> None:
