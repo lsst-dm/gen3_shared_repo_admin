@@ -53,5 +53,5 @@ internal to the dataset.
 
 UMBRELLA = WrappedStringTemplate("""\
 Convenience collection that points to the recommended versions of most standard
-processing input collections, for {tail}.
+processing input collections, for {tail}
 """)
