@@ -38,21 +38,25 @@ from ._tool import RepoAdminTool
 # doesn't look like delegating to that would give us the kind of control we
 # want her.
 #
-# Instead of setting up logs to write to stderr, we write them to per-repo
-# files in the user's current directory, and reserving direct console output
-# for exceptions and progress meters.  (If it didn't look _super-XML-painful_
-# to write just warning logs to the console, I'd have done that, too).
+# We write WARNING and above to stderr, and write DEBUG and above to per-repo
+# files in the user's current directory.  If we're runnning with --verbose or
+# --dry-run, then we also send INFO to stderr.
 #
 # One thing this does not carry over from cliLog is unsetting the log state for
 # use in unit tests; these are admin scripts, and we're not going to bother
 # trying to unit test the CLI for them.  But don't copy this elsewhere if you
 # want to write tests against the CLI - go directly to daf_butler instead.
 _LOG_PROP = """\
-log4j.rootLogger=DEBUG, FA
+log4j.rootLogger=DEBUG, FA, A1
 log4j.appender.FA=FileAppender
 log4j.appender.FA.file={log_file}
 log4j.appender.FA.layout=PatternLayout
 log4j.appender.FA.layout.ConversionPattern=%-5p %d{{yyyy-MM-ddTHH:mm:ss.SSSZ}} %c %m%n
+log4j.appender.A1=ConsoleAppender
+log4j.appender.A1.Target=System.err
+log4j.appender.A1.Threshold={console_level}
+log4j.appender.A1.layout=PatternLayout
+log4j.appender.A1.layout.ConversionPattern=%c %p: %m%n
 """
 
 
@@ -71,7 +75,7 @@ class ConsoleProgressHandler(ProgressHandler):
 @click.argument("name", type=str)
 @click.option("--date", type=str, envvar="LSST_BUTLER_ADMIN_DATE")
 @click.option("--site", type=str, envvar="LSST_BUTLER_ADMIN_SITE")
-@click.option("--verbose", type=bool, default=False)
+@click.option("--verbose", is_flag=True)
 @click.option("--work-root", type=click.Path(dir_okay=True, file_okay=False, exists=True, writable=True),
               envvar="LSST_BUTLER_ADMIN_WORK_ROOT")
 @click.option("-n", "--dry-run", is_flag=True)
@@ -80,7 +84,12 @@ class ConsoleProgressHandler(ProgressHandler):
 @click.option("--cleanup", is_flag=True)
 def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: str, dry_run: bool,
         jobs: int, status: bool, cleanup: bool):
-    lsst.log.configure_prop(_LOG_PROP.format(log_file=f"{work_root}/{repo}_{date}.log"))
+    lsst.log.configure_prop(
+        _LOG_PROP.format(
+            log_file=f"{work_root}/{repo}_{date}.log",
+            console_level="INFO" if dry_run or verbose else "WARN"
+        )
+    )
     python_logger = logging.getLogger()
     python_logger.setLevel(logging.INFO)
     python_logger.addHandler(lsst.log.LogHandler())
