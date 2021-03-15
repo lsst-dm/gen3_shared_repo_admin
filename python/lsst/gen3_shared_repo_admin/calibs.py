@@ -181,4 +181,5 @@ class ConvertCalibrations(CalibrationOperation):
         config.datasetIgnorePatterns.append("*_camera")
         config.datasetIgnorePatterns.append("yBackground")
         config.datasetIgnorePatterns.append("fgcmLookUpTable")
-        return ConvertRepoTask(config=config, butler3=tool.butler, instrument=instrument, **kwargs)
+        return ConvertRepoTask(config=config, butler3=tool.butler, instrument=instrument,
+                               dry_run=tool.dry_run, **kwargs)
