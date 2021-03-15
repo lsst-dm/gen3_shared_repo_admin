@@ -93,6 +93,7 @@ DC2 = RepoDefinition(
         dc2.calib_operations(),
         visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",)),
         dc2.umbrella_operations(),
+        dc2.rerun_operations_DP0(),
     ),
 )
 

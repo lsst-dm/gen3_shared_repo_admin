@@ -21,16 +21,19 @@
 
 from __future__ import annotations
 
-__all__ = ("raw_operations", "refcat_operations", "umbrella_operations", "calib_operations")
+__all__ = ("raw_operations", "refcat_operations", "umbrella_operations", "calib_operations",
+           "rerun_operations_DP0")
 
 import os
 from pathlib import Path
+import textwrap
 from typing import Dict, Set, TYPE_CHECKING
 
 from .calibs import WriteCuratedCalibrations
 from .common import DefineChain, Group
 from .ingest import DefineRawTag, ExposureFinder, RawIngest
 from .refcats import RefCatIngest
+from .reruns import ConvertRerun
 from . import doc_templates
 
 if TYPE_CHECKING:
@@ -225,6 +228,100 @@ def calib_operations() -> Group:
                     "2.2i/calib/PREOPS-301/unbounded",
                 ),
                 doc=doc_templates.DEFAULT_CALIBS.format(instrument="Run2.2i"),
+            )
+        )
+    )
+
+
+def rerun_operations_DP0() -> Group:
+    """Helper function that returns the admin operations that convert the
+    DESC DC2 processing reruns that will be used for DP0.1.
+
+    Returns
+    -------
+    group : `Group`
+        A group of admin operations.
+    """
+    # Coaddition and coadd-processing repos are small enough to be converted
+    # in one go.
+    full_repo_steps = {
+        "-coadd-wfd-dr6-v1-grizy": "coadd/wfd/dr6/v1/grizy",
+        "-coadd-wfd-dr6-v1-u": "coadd/wfd/dr6/v1/u",
+        "-coadd-wfd-dr6-v1": "coadd/wfd/dr6/v1",
+    }
+    reruns = [
+        ConvertRerun(
+            f"2.2i-rerun-DP0-{v.replace('/', '-')}",
+            instrument_name="LSSTCam-imSim",
+            root="/datasets/DC2/DR6/Run2.2i/patched/2021-02-10",
+            repo_path=f"rerun/run2.2i{k}",
+            run_name=f"2.2i/runs/DP0.1/{v}",
+            include=("*",),
+            exclude=(),
+        )
+        for k, v in full_repo_steps.items()
+    ]
+    # The calexp repo is so big we convert it in a few steps, splitting up the
+    # dataset types.
+    # This first bunch got ingested via an earlier operation definition that
+    # didn't split them up.
+    done_first = ("calexp", "calexpBackground", "icSrc", "icSrc_schema", "src_schema")
+    reruns.append(
+        ConvertRerun(
+            "2.2i-rerun-DP0-calexp-0",
+            instrument_name="LSSTCam-imSim",
+            root="/datasets/DC2/DR6/Run2.2i/patched/2021-02-10",
+            repo_path="rerun/run2.2i-calexp-v1",
+            run_name="2.2i/runs/DP0.1/calexp/v1",
+            include=done_first,
+            exclude=(),
+        )
+    )
+    # Make each other regular dataset its own step
+    full_dataset_types = ("src", "skyCorr", "srcMatch")
+    reruns.extend(
+        ConvertRerun(
+            f"2.2i-rerun-DP0-calexp-{dataset_type}",
+            instrument_name="LSSTCam-imSim",
+            root="/datasets/DC2/DR6/Run2.2i/patched/2021-02-10",
+            repo_path="rerun/run2.2i-calexp-v1",
+            run_name="2.2i/runs/DP0.1/calexp/v1",
+            include=(dataset_type,),
+            exclude=(),
+        )
+        for dataset_type in full_dataset_types
+    )
+    # Add one more step for miscellaneous things, like config datasets.
+    reruns.append(
+        ConvertRerun(
+            "2.2i-rerun-DP0-calexp-misc",
+            instrument_name="LSSTCam-imSim",
+            root="/datasets/DC2/DR6/Run2.2i/patched/2021-02-10",
+            repo_path="rerun/run2.2i-calexp-v1",
+            run_name="2.2i/runs/DP0.1/calexp/v1",
+            include=("*",),
+            exclude=done_first + full_dataset_types,
+        )
+    )
+    inputs = ("2.2i/raw/DP0", "2.2i/calib", "refcats", "skymaps")
+    return Group(
+        "2.2i-rerun-DP0",
+        (
+            tuple(reruns)
+            + (
+                DefineChain(
+                    "2.2i-rerun-DP0-chain",
+                    "2.2i/runs/DP0.1",
+                    tuple(
+                        f"2.2i/runs/DP0.1/{v}"
+                        for v in (list(reversed(full_repo_steps.values())) + ["calexp/v1"])
+                    ) + inputs,
+                    doc=textwrap.fill(
+                        "Parent collection for all DESC DC2 DR6 WFD "
+                        "processing converted from Gen2 for Data Preview 0.1."
+                    ),
+                    flatten=True,
+                ),
             )
         )
     )
