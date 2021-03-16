@@ -26,7 +26,7 @@ __all__ = ("RefCatIngest",)
 import os
 from pathlib import Path
 import re
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable, Iterator, TYPE_CHECKING
 
 from ._operation import AdminOperation, SimpleStatus
 from .common import DefineChain, Group
@@ -101,7 +101,7 @@ class RefCatIngest(AdminOperation):
                 tool.butler.ingest(*datasets, transfer="direct", run=self.collection)
 
 
-def generate(ticket: str, root: Path, names: Iterable[str]) -> Group:
+def generate(ticket: str, root: Path, names: Iterable[str]) -> Iterator[AdminOperation]:
     ingests = tuple(
         RefCatIngest(
             name,
@@ -119,4 +119,4 @@ def generate(ticket: str, root: Path, names: Iterable[str]) -> Group:
     return Group(
         "refcats",
         ingests + (chain,)
-    )
+    ).flatten()

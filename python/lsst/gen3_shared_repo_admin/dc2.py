@@ -27,16 +27,18 @@ __all__ = ("raw_operations", "refcat_operations", "umbrella_operations", "calib_
 import os
 from pathlib import Path
 import textwrap
-from typing import Dict, Set, TYPE_CHECKING
+from typing import Dict, Iterator, Set, TYPE_CHECKING
 
 from .calibs import WriteCuratedCalibrations
 from .common import DefineChain, Group
 from .ingest import DefineRawTag, ExposureFinder, RawIngest
 from .refcats import RefCatIngest
 from .reruns import ConvertRerun
+from .visits import DefineVisits
 from . import doc_templates
 
 if TYPE_CHECKING:
+    from ._operation import AdminOperation
     from ._tool import RepoAdminTool
 
 
@@ -325,3 +327,12 @@ def rerun_operations_DP0() -> Group:
             )
         )
     )
+
+
+def generate() -> Iterator[AdminOperation]:
+    yield from raw_operations().flatten()
+    yield from refcat_operations().flatten()
+    yield from calib_operations().flatten()
+    yield DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
+    yield from umbrella_operations().flatten()
+    yield from rerun_operations_DP0().flatten()

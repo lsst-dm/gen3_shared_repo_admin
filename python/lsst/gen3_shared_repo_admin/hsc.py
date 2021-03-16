@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-__all__ = ("operations",)
+__all__ = ("generate",)
 
 from collections import defaultdict
 import logging
@@ -500,8 +500,8 @@ def rc2_rerun(weekly: str, ticket: str, steps: Dict[str, str]) -> Group:
     return Group(f"HSC-rerun-RC2-{weekly}", reruns + (chain,))
 
 
-def operations() -> Group:
-    """Helper function that returns all HSC-specific operations.
+def generate() -> Iterator[AdminOperation]:
+    """Helper function that yields all HSC-specific operations.
 
     Returns
     -------
@@ -587,4 +587,4 @@ def operations() -> Group:
                 )
             ),
         )
-    )
+    ).flatten()

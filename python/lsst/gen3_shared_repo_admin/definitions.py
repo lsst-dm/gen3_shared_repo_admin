@@ -34,10 +34,8 @@ from ._repo_definition import RepoDefinition
 from ._site_definition import SiteDefinition
 from . import common
 from . import hsc
-from . import rubin
 from . import refcats
 from . import dc2
-from . import visits
 
 if TYPE_CHECKING:
     from ._operation import AdminOperation
@@ -66,9 +64,13 @@ def main_ncsa_operations() -> Iterator[AdminOperation]:
             "ps1_pv3_3pi_20170110",
             "sdss-dr9-fink-v5b",
         )
-    ).flatten()
-    yield from hsc.operations().flatten()
-    yield from rubin.main_operations().flatten()
+    )
+    yield from hsc.generate()
+    yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
+    yield common.RegisterInstrument("LSSTCam-registration", "lsst.obs.lsst.LsstCam")
+    yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
+    yield common.RegisterInstrument("LSST-TS8-registration", "lsst.obs.lsst.LsstTS8")
+    yield common.RegisterInstrument("LSST-TS3-registration", "lsst.obs.lsst.LsstTS3")
 
 
 def dc2_ncsa_operations() -> Iterator[AdminOperation]:
@@ -76,22 +78,20 @@ def dc2_ncsa_operations() -> Iterator[AdminOperation]:
     yield common.RegisterSkyMap("DC2")
     yield common.RegisterInstrument("imSim-registration", "lsst.obs.lsst.LsstCamImSim")
     yield common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim")
-    yield from dc2.raw_operations().flatten()
-    yield from dc2.refcat_operations().flatten()
-    yield from dc2.calib_operations().flatten()
-    yield visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
-    yield from dc2.umbrella_operations().flatten()
-    yield from dc2.rerun_operations_DP0().flatten()
+    yield from dc2.generate()
 
 
 def ccso_ncsa_operations() -> Iterator[AdminOperation]:
     yield common.CreateRepo()
-    yield rubin.ccso_operations()
+    yield common.RegisterInstrument("LSSTCam-registration", "lsst.obs.lsst.LsstCam")
+    yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
+    yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
 
 
 def teststand_ncsa_operations() -> Iterator[AdminOperation]:
     yield common.CreateRepo()
-    yield rubin.teststand_operations()
+    yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
+    yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
 
 
 REPOS = {
