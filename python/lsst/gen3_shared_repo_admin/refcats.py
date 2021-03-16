@@ -26,9 +26,10 @@ __all__ = ("RefCatIngest",)
 import os
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from typing import Iterable, TYPE_CHECKING
 
 from ._operation import AdminOperation, SimpleStatus
+from .common import DefineChain, Group
 
 if TYPE_CHECKING:
     from ._tool import RepoAdminTool
@@ -98,3 +99,24 @@ class RefCatIngest(AdminOperation):
                 tool.butler.registry.registerCollection(self.collection, CollectionType.RUN)
                 tool.butler.registry.registerDatasetType(dataset_type)
                 tool.butler.ingest(*datasets, transfer="direct", run=self.collection)
+
+
+def generate(ticket: str, root: Path, names: Iterable[str]) -> Group:
+    ingests = tuple(
+        RefCatIngest(
+            name,
+            path=Path(f"/datasets/refcats/htm/v1/{name}"),
+            collection=f"refcats/{ticket}",
+        )
+        for name in names
+    )
+    chain = DefineChain(
+        "refcats-chain",
+        "refcats",
+        (f"refcats/{ticket}",),
+        doc="Umbrella collection for all active reference catalogs.",
+    )
+    return Group(
+        "refcats",
+        ingests + (chain,)
+    )

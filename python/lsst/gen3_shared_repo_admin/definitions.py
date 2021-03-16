@@ -21,10 +21,10 @@
 
 from __future__ import annotations
 
-__all__ = ("REPOS", "SITES")
+__all__ = ("REPOS",)
 
-import dataclasses
 from pathlib import Path
+from typing import Iterator, TYPE_CHECKING
 
 # We try hard to avoid importing much of the stack here, as that's slow
 # (especially compared to expected command-line responsivity for things like
@@ -39,106 +39,66 @@ from . import refcats
 from . import dc2
 from . import visits
 
+if TYPE_CHECKING:
+    from ._operation import AdminOperation
 
-# Template repo definitions that don't include dates, for things that don't
-# change with every date.
-
-MAIN = RepoDefinition(
-    name="main",
-    operations=(
-        common.CreateRepo(),
-        common.Group(
-            "skymaps", (
-                common.RegisterSkyMap("hsc_rings_v1"),
-            ),
-        ),
-        common.Group(
-            "refcats", tuple(
-                refcats.RefCatIngest(
-                    name,
-                    path=Path(f"/datasets/refcats/htm/v1/{name}"),
-                    collection="refcats/DM-28636",
-                )
-                for name in (
-                    "gaia_dr2_20200414",
-                    "ps1_pv3_3pi_20170110",
-                    "sdss-dr9-fink-v5b",
-                )
-            ) + (
-                common.DefineChain(
-                    "refcats-chain",
-                    "refcats",
-                    ("refcats/DM-28636",),
-                    doc="Umbrella collection for all active reference catalogs.",
-                ),
-            )
-        ),
-        hsc.operations(),
-        rubin.main_operations(),
-    ),
-)
-
-DC2 = RepoDefinition(
-    name="dc2",
-    operations=(
-        common.CreateRepo(),
-        common.Group(
-            "skymaps", (
-                common.RegisterSkyMap("DC2"),
-            ),
-        ),
-        common.RegisterInstrument("imSim-registration", "lsst.obs.lsst.LsstCamImSim"),
-        common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim"),
-        dc2.raw_operations(),
-        dc2.refcat_operations(),
-        dc2.calib_operations(),
-        visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",)),
-        dc2.umbrella_operations(),
-        dc2.rerun_operations_DP0(),
-    ),
-)
-
-CCSO = RepoDefinition(
-    name="ccso",
-    operations=(
-        common.CreateRepo(),
-        rubin.ccso_operations(),
-    ),
-)
-
-TESTSTAND = RepoDefinition(
-    name="teststand",
-    operations=(
-        common.CreateRepo(),
-        rubin.teststand_operations(),
-    ),
-)
-
-# Concrete repo definitions that do include dates, and whatever specializations
-# those involve, grouped by name then date.
-
-REPOS = {
-    "main": {
-        "20210215": dataclasses.replace(MAIN, date="20210215"),
-    },
-    "dc2": {
-        "20210215": dataclasses.replace(DC2, date="20210215"),
-    },
-    "ccso": {
-        "20210215": dataclasses.replace(CCSO, date="20210215"),
-    },
-    "teststand": {
-        "20210215": dataclasses.replace(TESTSTAND, date="20210215"),
-    },
-}
 
 # Concrete site definitions.
 
-SITES = {
-    "NCSA": SiteDefinition(
-        name="ncsa",
-        repo_uri_template="/repo/{repo.name}_{repo.date}",
-        db_namespace_template="{repo.name}_{repo.date}",
-        db_uri_template="postgresql://lsst-pg-prod1.ncsa.illinois.edu:5432/lsstdb1",
-    ),
+NCSA = SiteDefinition(
+    name="NCSA",
+    repo_uri_template="/repo/{repo.name}_{repo.date}",
+    db_namespace_template="{repo.name}_{repo.date}",
+    db_uri_template="postgresql://lsst-pg-prod1.ncsa.illinois.edu:5432/lsstdb1",
+)
+
+
+# Generators for operations.
+
+def main_ncsa_operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
+    yield common.RegisterSkyMap("hsc_rings_v1")
+    yield from refcats.generate(
+        "DM-28636",
+        Path("/datasets/refcats/htm/v1"),
+        (
+            "gaia_dr2_20200414",
+            "ps1_pv3_3pi_20170110",
+            "sdss-dr9-fink-v5b",
+        )
+    ).flatten()
+    yield from hsc.operations().flatten()
+    yield from rubin.main_operations().flatten()
+
+
+def dc2_ncsa_operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
+    yield common.RegisterSkyMap("DC2")
+    yield common.RegisterInstrument("imSim-registration", "lsst.obs.lsst.LsstCamImSim")
+    yield common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim")
+    yield from dc2.raw_operations().flatten()
+    yield from dc2.refcat_operations().flatten()
+    yield from dc2.calib_operations().flatten()
+    yield visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
+    yield from dc2.umbrella_operations().flatten()
+    yield from dc2.rerun_operations_DP0().flatten()
+
+
+def ccso_ncsa_operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
+    yield rubin.ccso_operations()
+
+
+def teststand_ncsa_operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
+    yield rubin.teststand_operations()
+
+
+REPOS = {
+    (repo.name, repo.date, repo.site.name): repo for repo in [
+        RepoDefinition(name="main", date="20210215", site=NCSA, operations=main_ncsa_operations),
+        RepoDefinition(name="dc2", date="20210215", site=NCSA, operations=dc2_ncsa_operations),
+        RepoDefinition(name="ccso", date="20210215", site=NCSA, operations=ccso_ncsa_operations),
+        RepoDefinition(name="teststand", date="20210215", site=NCSA, operations=teststand_ncsa_operations),
+    ]
 }

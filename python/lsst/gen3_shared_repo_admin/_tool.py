@@ -25,11 +25,12 @@ __all__ = ("RepoAdminTool",)
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from lsst.daf.butler import Butler, Progress, TYPE_CHECKING
+from lsst.daf.butler import Butler, Progress
 
 from ._operation import OperationNotReadyError
-from .definitions import REPOS, SITES
+from .definitions import REPOS
 
 if TYPE_CHECKING:
     from ._repo_definition import RepoDefinition
@@ -48,8 +49,6 @@ class RepoAdminTool:
     ----------
     repo : `RepoDefinition`
         Definition of the concrete repository.
-    site : `SiteDefinition`
-        Definition of the site where this instance of the repository lives.
     work_root : `Path`
         Root directory for logs and status files.  Must be consistent between
         runs.
@@ -59,12 +58,11 @@ class RepoAdminTool:
     jobs : `int`, optional
         Number of processes to use, when possible.  Defaults to 1.
     """
-    def __init__(self, repo: RepoDefinition, site: SiteDefinition, work_root: Path, dry_run: bool = False,
+    def __init__(self, repo: RepoDefinition, work_root: Path, dry_run: bool = False,
                  jobs: int = 1):
         self.repo = repo
-        self.site = site
         self.operations = {}
-        for parent_operation in self.repo.operations:
+        for parent_operation in self.repo.operations():
             self.operations.update((op.name, op) for op in parent_operation.flatten())
         self._butler = None
         self.dry_run = dry_run
@@ -102,7 +100,12 @@ class RepoAdminTool:
         tool : `RepoAdminTool`
             A new tool instance.
         """
-        return cls(REPOS[repo][date], SITES[site], work_root=Path(work_root), dry_run=dry_run, jobs=jobs)
+        return cls(REPOS[repo, date, site], work_root=Path(work_root), dry_run=dry_run, jobs=jobs)
+
+    @property
+    def site(self) -> SiteDefinition:
+        # TODO
+        return self.repo.site
 
     @property
     def root(self) -> str:

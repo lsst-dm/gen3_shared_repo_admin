@@ -24,9 +24,10 @@ from __future__ import annotations
 __all__ = ("RepoDefinition",)
 
 import dataclasses
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Iterator, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ._site_definition import SiteDefinition
     from ._operation import AdminOperation
 
 
@@ -45,11 +46,16 @@ class RepoDefinition:
     """Name, not including any date component.
     """
 
-    date: Optional[str] = None
+    date: str
     """Date string indicating the repository version, YYYYMMDD.
+    """
 
-    May be `None` only as way to define a common repository definition that
-    will be copied into many date-versioned repository definitions.
+    site: SiteDefinition
+    # TODO
+
+    operations: Callable[[], Iterator[AdminOperation]]
+    """Callable that returns an iterator over `AdminOperation` objects that
+    define the work needed to set up this data repository.
     """
 
     butler_config_templates: list[str] = dataclasses.field(
@@ -84,17 +90,4 @@ class RepoDefinition:
     (`RepoDefinition`) and ``site`` (`SiteDefinition`) arguments.
 
     Templates that evaluate to URIs that do not exist are ignored.
-    """
-
-    operations: Tuple[AdminOperation, ...] = ()
-    """Sequence of `AdminOperation` objects that describes the work needed
-    to set up this data repository.
-
-    `Group` objects should usually be used to provide some structure.
-    The list should be in an order consistent with any dependencies between
-    operations that aren't captured by special `Group` subclasses.
-
-    This is a tuple rather than a list to ensure concrete, date-versioned
-    `RepoDefinition` objects aren't created with a mutable reference to any
-    abstract defintions they are based upon.
     """
