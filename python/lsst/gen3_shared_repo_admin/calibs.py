@@ -112,9 +112,13 @@ class ConvertCalibrations(CalibrationOperation):
         Root of the Gen2 repository suite (a non-calibration repo).
     repo_path : `str`
         Path to the calibration repo, either absolute or relative to ``root``.
+    collection_prefix : `str`, optional
+        Collection name prefix to use instead of the instrument name.
     """
-    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...], root: str, repo_path: str):
-        super().__init__(name, instrument_name=instrument_name, labels=labels)
+    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...], root: str, repo_path: str,
+                 collection_prefix: Optional[str] = None):
+        super().__init__(name, instrument_name=instrument_name, labels=labels,
+                         collection_prefix=collection_prefix)
         self._repo_path = repo_path
         self._root = root
 

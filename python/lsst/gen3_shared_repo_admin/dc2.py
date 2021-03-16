@@ -29,7 +29,7 @@ from pathlib import Path
 import textwrap
 from typing import Dict, Iterator, Set, TYPE_CHECKING
 
-from .calibs import WriteCuratedCalibrations
+from .calibs import ConvertCalibrations, WriteCuratedCalibrations
 from .common import DefineChain, Group
 from .ingest import DefineRawTag, ExposureFinder, RawIngest
 from .refcats import RefCatIngest
@@ -219,14 +219,24 @@ def calib_operations() -> Group:
     group : `Group`
         A group of admin operations.
     """
+    root = "/datasets/DC2/DR6/Run2.2i/patched/2021-02-10"
     return Group(
         "2.2i-calibs", (
             WriteCuratedCalibrations("2.2i-calibs-curated", "LSSTCam-imSim", labels=("PREOPS-301",),
                                      collection_prefix="2.2i"),
+            ConvertCalibrations(
+                name="2.2i-calibs-convert",
+                instrument_name="LSSTCam-imSim",
+                labels=("gen2",),
+                root=root,
+                repo_path=os.path.join(root, "CALIB"),
+                collection_prefix="2.2i",
+            ),
             DefineChain(
                 "2.2i-calibs-default",
                 "2.2i/calib", (
                     "2.2i/calib/PREOPS-301",
+                    "2.2i/calib/gen2",
                     "2.2i/calib/PREOPS-301/unbounded",
                 ),
                 doc=doc_templates.DEFAULT_CALIBS.format(instrument="Run2.2i"),
