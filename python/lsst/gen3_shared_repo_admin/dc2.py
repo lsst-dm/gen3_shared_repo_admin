@@ -126,7 +126,11 @@ def raw_operations() -> Group:
                         instrument_name="LSSTCam-imSim",
                         input_collection="2.2i/raw/all",
                         output_collection="2.2i/raw/test-med-1",
-                        doc="Raw images used as inputs for DM's medium-scale regular test processing.",
+                        doc=textwrap.fill(
+                            "Raw images used as inputs for DM's medium-scale regular test processing. "
+                            "This includes two tracts of y1-wfd data, tracts 3828 and 3829 and partial y2. "
+                            "See DM-22954 for more information."
+                        ),
                     ),
                 ),
             ),
