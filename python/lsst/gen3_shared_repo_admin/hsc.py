@@ -561,6 +561,14 @@ def generate() -> Iterator[AdminOperation]:
                             "HSC/calib/DM-28636/unbounded",
                         ),
                         doc=doc_templates.DEFAULT_CALIBS.format(instrument="HSC"),
+                    ),
+                    DefineChain(
+                        "HSC-calibs-default-unbounded",
+                        "HSC/calib/unbounded", (
+                            "HSC/calib/gen2/20180117/unbounded",
+                            "HSC/calib/DM-28636/unbounded",
+                        ),
+                        doc=doc_templates.DEFAULT_CALIBS_UNBOUNDED.format(instrument="HSC"),
                     )
                 ),
             ),
@@ -599,7 +607,7 @@ def generate() -> Iterator[AdminOperation]:
             DefineChain(
                 "HSC-RC2-defaults",
                 "HSC/RC2/defaults", (
-                    "HSC/raw/RC2", "HSC/calib", "HSC/masks", "refcats", "skymaps",
+                    "HSC/raw/RC2", "HSC/calib", "HSC/masks", "HSC/fgcmcal/lut/RC2", "refcats", "skymaps",
                 ),
                 doc=doc_templates.UMBRELLA.format(tail="the HSC RC2 test dataset.")
             ),

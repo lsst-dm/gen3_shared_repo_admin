@@ -23,6 +23,7 @@ from __future__ import annotations
 
 ___all__ = (
     "DEFAULT_CALIBS",
+    "DEFAULT_CALIBS_UNBOUNDED",
     "UMBRELLA",
 )
 
@@ -49,6 +50,17 @@ infinite), followed by zero or more non-`CALIBRATION` collections holding only
 unbounded calibrations - those whose validity ranges can be safely assumed by
 pipeline code to be infinite (possibly because the actual validity lookup is
 internal to the dataset.
+""")
+
+DEFAULT_CALIBS_UNBOUNDED = WrappedStringTemplate("""\
+Default unbounded calibration datasets for {instrument} processing.
+
+This collection is provided for tasks that need to read a calibration dataset
+(almost always "camera") without providing a validity date to search, reyling
+instead on the assertion that the calibration dataset isn't actually varying in
+time.  Dataset types may disappear from future versions of this collection
+unexpectedly if they do become varying in time, so it should only be used when
+absolutely necessary.
 """)
 
 UMBRELLA = WrappedStringTemplate("""\
