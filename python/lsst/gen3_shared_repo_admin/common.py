@@ -26,15 +26,27 @@ __all__ = (
     "DefineChain",
     "DefineTag",
     "Group",
+    "IngestFiles",
     "RegisterInstrument",
     "RegisterSkyMap",
 )
 
 import os
-from typing import Iterable, Iterator, Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import AbstractSet, Any, Iterable, Iterator, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from lsst.utils import doImport
-from lsst.daf.butler import ButlerURI, Butler, Config, DatasetRef, DimensionConfig
+from lsst.daf.butler import (
+    ButlerURI,
+    Butler,
+    CollectionType,
+    Config,
+    DatasetRef,
+    DatasetType,
+    DimensionConfig,
+    FileDataset,
+)
+from lsst.daf.butler.registry import MissingCollectionError
 
 from ._operation import AdminOperation, OperationNotReadyError
 
@@ -258,7 +270,6 @@ class DefineTag(AdminOperation):
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
-        from lsst.daf.butler import CollectionType
         refs = set(self._query(tool))
         tool.log.info("Found %d datasets to associate into %s.", len(refs), self.tagged)
         if not tool.dry_run:
@@ -308,7 +319,6 @@ class DefineChain(AdminOperation):
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
-        from lsst.daf.butler.registry import MissingCollectionError
         try:
             children = tool.butler.registry.getCollectionChain(self.chain)
         except MissingCollectionError:
@@ -331,7 +341,6 @@ class DefineChain(AdminOperation):
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
-        from lsst.daf.butler import CollectionType
         if not tool.dry_run:
             tool.butler.registry.registerCollection(self.chain, CollectionType.CHAINED)
             tool.butler.registry.setCollectionChain(self.chain, self.children, flatten=self._flatten)
@@ -341,3 +350,68 @@ class DefineChain(AdminOperation):
         # Docstring inherited.
         if not tool.dry_run:
             tool.butler.registry.removeCollection(self.chain)
+
+
+class IngestFiles(AdminOperation):
+
+    def __init__(self, name: str, collection: str,
+                 dataset_type_name: str,
+                 dimensions: AbstractSet[str],
+                 storage_class: str,
+                 datasets: Mapping[Path, Mapping[str, Any]],
+                 transfer: Optional[str]):
+        super().__init__(name)
+        self.collection = collection
+        self.dataset_type_name = dataset_type_name
+        self.dimensions = dimensions
+        self.storage_class = storage_class
+        self.datasets = datasets
+        self.transfer = transfer
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        try:
+            dataset_type = tool.butler.registry.getDatasetType(self.dataset_type_name)
+        except KeyError:
+            print(f"{' '*indent}{self.name}: not started.")
+            return
+        n_found = 0
+        n_total = 0
+        for file_dataset in self._file_datasets(tool, dataset_type):
+            for ref in file_dataset.refs:
+                resolved_ref = tool.butler.registry.findDataset(ref.datasetType, ref.dataId,
+                                                                collections=[self.collection])
+                if resolved_ref is not None:
+                    n_found += 1
+                n_total += 1
+        if n_found == n_total:
+            print(f"{' '*indent}{self.name}: done; {n_total} dataset(s) ingested.")
+        elif n_found == 0:
+            print(f"{' '*indent}{self.name}: dataset type and collection registered; "
+                  f"{n_total} dataset(s) to ingest.")
+        else:
+            print(f"{' '*indent}{self.name}: in progress; {n_found} of {n_total} dataset(s) ingested.")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        dataset_type = self._dataset_type(tool)
+        if not tool.dry_run:
+            tool.butler.registry.registerCollection(self.collection, CollectionType.RUN)
+            tool.butler.registry.registerDatasetType(dataset_type)
+            tool.butler.ingest(*self._file_datasets(tool, dataset_type),
+                               transfer=self.transfer, run=self.collection)
+
+    def _dataset_type(self, tool: RepoAdminTool) -> DatasetType:
+        return DatasetType(self.dataset_type_name, dimensions=self.dimensions,
+                           storageClass=self.storage_class,
+                           universe=tool.butler.registry.dimensions)
+
+    def _file_datasets(self, tool: RepoAdminTool, dataset_type: Optional[DatasetType] = None,
+                       ) -> Iterator[FileDataset]:
+        if dataset_type is None:
+            dataset_type = self._dataset_type(tool)
+        for path, data_id in self.datasets.items():
+            yield FileDataset(
+                refs=[DatasetRef(dataset_type, data_id, conform=True)],
+                path=str(path),
+            )
