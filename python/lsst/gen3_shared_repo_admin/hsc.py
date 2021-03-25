@@ -33,7 +33,7 @@ from typing import Callable, Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING
 from ._operation import AdminOperation, OperationNotReadyError, SimpleStatus
 from .ingest import RawIngest, ExposureFinder
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
-from .common import Group, RegisterInstrument, DefineChain, DefineTag
+from .common import Group, RegisterInstrument, DefineChain, DefineTag, IngestFiles
 from .visits import DefineVisits
 from .reruns import ConvertRerun
 from . import doc_templates
@@ -500,6 +500,31 @@ def rc2_rerun(weekly: str, ticket: str, steps: Dict[str, str]) -> Group:
     return Group(f"HSC-rerun-RC2-{weekly}", reruns + (chain,))
 
 
+def rc2_fgcmcal_lut() -> AdminOperation:
+    return Group(
+        "HSC-fgcmlut-RC2", (
+            IngestFiles(
+                "HSC-fgcmlut-RC2-ingest",
+                collection="HSC/fgcmcal/lut/RC2/DM-28636",
+                dataset_type_name="fgcmLookUpTable",
+                dimensions={"instrument"},
+                storage_class="Catalog",
+                datasets={
+                    Path("/project/erykoff/rc2_gen3/fgcmlut/fgcm-process/fgcmLookUpTable.fits"):
+                        {"instrument": "HSC"}
+                },
+                transfer="copy",
+            ),
+            DefineChain(
+                "HSC-fgcmlut-RC2-chain",
+                "HSC/fgcmcal/lut/RC2",
+                ("HSC/fgcmcal/lut/RC2/DM-28636",),
+                doc="Default lookup table for FGCM over the RC2 dataset.",
+            ),
+        )
+    )
+
+
 def generate() -> Iterator[AdminOperation]:
     """Helper function that yields all HSC-specific operations.
 
@@ -569,6 +594,7 @@ def generate() -> Iterator[AdminOperation]:
                 ),
                 doc=doc_templates.UMBRELLA.format(tail="all available HSC data.")
             ),
+            rc2_fgcmcal_lut(),
             rc2_tags(),
             DefineChain(
                 "HSC-RC2-defaults",
