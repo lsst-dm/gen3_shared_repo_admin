@@ -32,6 +32,7 @@ from typing import Iterator, TYPE_CHECKING
 
 from ._repo_definition import RepoDefinition
 from ._site_definition import SiteDefinition
+from . import check
 from . import common
 from . import hsc
 from . import refcats
@@ -79,6 +80,14 @@ def dc2_ncsa_operations() -> Iterator[AdminOperation]:
     yield common.RegisterInstrument("imSim-registration", "lsst.obs.lsst.LsstCamImSim")
     yield common.RegisterInstrument("phoSim-registration", "lsst.obs.lsst.LsstCamPhoSim")
     yield from dc2.generate()
+    yield check.CheckURIs(
+        "check-URIs",
+        # visits are arbitrary, but cover all bands and all overlap this
+        # (also-arbitrary) tract.
+        [{"instrument": "LSSTCam-imSim", "visit": v, "exposure": v,
+          "skymap": "DC2", "tract": 4644, "detector": 90}
+         for v in (760247, 944265, 896824, 471974, 971097, 190279)]
+    )
 
 
 def ccso_ncsa_operations() -> Iterator[AdminOperation]:
