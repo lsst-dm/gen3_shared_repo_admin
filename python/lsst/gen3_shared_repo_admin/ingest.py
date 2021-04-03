@@ -27,6 +27,7 @@ __all__ = (
     "IngestLogicError",
     "RawIngest",
     "RawIngestGroup",
+    "UnstructuredExposureFinder",
 )
 
 from abc import ABC, abstractmethod
@@ -39,6 +40,7 @@ from pathlib import Path
 import re
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterator,
     List,
@@ -434,6 +436,9 @@ class RawIngest(AdminOperation):
     collection : `str`, optional
         Name of the `~lsst.daf.butler.CollectionType.RUN` collection to ingest
         raws into.
+    transfer : `str`, option
+        Datastore transfer mode for files.  Defaults to "direct", for
+        absolute-URI ingest.
     """
 
     def __init__(
@@ -443,12 +448,14 @@ class RawIngest(AdminOperation):
         instrument_name: str,
         task_class_name: str = "lsst.obs.base.RawIngestTask",
         collection: Optional[str] = None,
+        transfer: Optional[str] = "direct",
     ):
         super().__init__(name)
         self.finder = finder
         self._instrument_name = instrument_name
         self.task_class_name = task_class_name
         self.collection = collection
+        self.transfer = transfer
 
     def split_into(self, n: int) -> RawIngestGroup:
         """Split this operation into a group in which each child is responsible
@@ -528,7 +535,7 @@ class RawIngest(AdminOperation):
             todo = found.keys() - ingested
             print(f"{' '*indent}{self.name}: {len(todo)} exposures remaining")
         else:
-            print(f"{' '*indent}{self.name}: done")
+            print(f"{' '*indent}{self.name}: nothing to do")
 
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
@@ -575,7 +582,7 @@ class RawIngest(AdminOperation):
             Additional keyword arguments to forward to the task constructor.
         """
         config = self.TaskClass.ConfigClass()
-        config.transfer = "direct"
+        config.transfer = self.transfer
         config.failFast = True  # we do our own, per-exposure continue
         return self.TaskClass(config=config, butler=tool.butler, **kwargs)
 
@@ -700,3 +707,77 @@ class DefineRawTag(AdminOperation):
                 )
                 progress_bar.update(stop - start)
         return refs
+
+
+class UnstructuredExposureFinder(ExposureFinder):
+    """An intermediate base class for `ExposureFinder` implementations that
+    search directories recursively for raws matching a regex, making no
+    expectations about directory structure but assuming exposure IDs can be
+    extracted from the filename.
+
+    Parameters
+    ----------
+    root : `str`
+        Root path to search; subdirectories are searched recursively for
+        matching files.
+    file_regex : `str`
+        Regular expression that raw files must match.  This is compared to the
+        filename only, and to file symlink names, not their targets, when
+        ``follow_symlinks`` is `True`.
+    resolve_duplicates : `Callable`
+        A callable that takes two `Path` arguments and returns a new `Path`
+        (or `None`), to be invoked when the finder detects two directories
+        that each contain a raw from the same exposure (but not necessarily
+        the same one), indicating which is preferred.  The default always
+        returns `None`, which causes `RuntimeError` to be raised.
+    follow_symlinks: `bool`, optional
+        If `True`, follow both file and directory symlinks and ingest their
+        targets.  If `False` (default), all symlinks are ignored.
+
+    Notes
+    -----
+    Subclasses must still implement `ExposureFinder.expand`, and will
+    also need to reimplement the new `extract_exposure_id` method.
+    """
+
+    def __init__(self, root: Path, file_regex: str, *,
+                 resolve_duplicates: Callable[[Path, Path], Optional[Path]] = lambda a, b: None,
+                 follow_symlinks: bool = False):
+        self._root = root
+        self._file_regex = file_regex
+        self._resolve_duplicates = resolve_duplicates
+        self._follow_symlinks = follow_symlinks
+
+    @abstractmethod
+    def extract_exposure_id(self, tool: RepoAdminTool, match: re.Match) -> int:
+        """Extract an exposure ID from a filename regular expression match
+        object.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        match : `re.Match`
+            Match object for a found filename.
+
+        Returns
+        -------
+        exposure_id : `int`
+            Integer exposure ID.
+        """
+        raise NotImplementedError()
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        result = {}
+        for path, match in self.recursive_regex(tool, self._root, self._file_regex,
+                                                follow_symlinks=self._follow_symlinks):
+            exposure_id = self.extract_exposure_id(tool, match)
+            previous_path = result.setdefault(exposure_id, path.parent)
+            if previous_path != path.parent:
+                if (best_path := self._resolve_duplicates(previous_path, path.parent)) is not None:
+                    result[exposure_id] = best_path
+                else:
+                    raise RuntimeError(f"Found multiple directory paths ({previous_path}, {path.parent}) "
+                                       f"for exposure {exposure_id}.")
+        return result

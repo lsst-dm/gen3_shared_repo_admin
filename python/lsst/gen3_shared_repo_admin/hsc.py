@@ -28,10 +28,10 @@ import logging
 import os
 from pathlib import Path
 import textwrap
-from typing import Callable, Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING
 
 from ._operation import AdminOperation, OperationNotReadyError, SimpleStatus
-from .ingest import RawIngest, ExposureFinder
+from .ingest import RawIngest, ExposureFinder, UnstructuredExposureFinder
 from .calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
 from .common import Group, RegisterInstrument, DefineChain, DefineTag, IngestFiles
 from .visits import DefineVisits
@@ -39,12 +39,13 @@ from .reruns import ConvertRerun
 from . import doc_templates
 
 if TYPE_CHECKING:
+    import re
     from lsst.daf.butler import DataCoordinate
     from lsst.skymap import BaseSkyMap
     from ._tool import RepoAdminTool
 
 
-class _ExposureFinder(ExposureFinder):
+class _ExposureFinder(UnstructuredExposureFinder):
     """An `ExposureFinder` implementation for HSC data (and possibly,
     accidentally, the way some of it is organized at NCSA).
 
@@ -63,19 +64,14 @@ class _ExposureFinder(ExposureFinder):
         If `True`, allow incomplete exposures that do not have a full
         complement of detectors (including wavefront sensors, but not focus
         sensors).  Default is `False`.
-    resolve_duplicates : `Callable`
-        A callable that takes two `Path` arguments and returns a new `Path`
-        (or `None`), to be invoked when the finder detects two directories
-        that each contain a raw from the same exposure (but not necessarily
-        the same one), indicating which is preferred.  The default always
-        returns `None`, which causes `RuntimeError` to be raised.
+    **kwargs
+        Forwarded to `UnstructuredExposureFinder`.
     """
 
-    def __init__(self, root: Path, allow_incomplete: bool = False,
-                 resolve_duplicates: Callable[[Path, Path], Optional[Path]] = lambda a, b: None):
+    def __init__(self, root: Path, *, allow_incomplete: bool = False, **kwargs: Any):
+        super().__init__(root, self.FILE_REGEX, **kwargs)
         self._root = root
         self._allow_incomplete = allow_incomplete
-        self._resolve_duplicates = resolve_duplicates
 
     FILE_REGEX = r"HSCA(\d{8}).fits"
 
@@ -85,26 +81,17 @@ class _ExposureFinder(ExposureFinder):
     """HSC internal detector IDs used in filenames.
     """
 
-    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+    def extract_exposure_id(self, tool: RepoAdminTool, match: re.Match) -> int:
         # Docstring inherited.
-        result = {}
-        for path, match in self.recursive_regex(tool, self._root, self.FILE_REGEX):
-            # HSC visit/exposure IDs are always even-numbered, to allow for
-            # more than 100 CCDs while otherwise using the same pattern as the
-            # old Supreme-Cam.  The CCD identifiers here aren't the
-            # pure-integer ones we prefer to use in the pipelines, so we ignore
-            # them entirely; we'll get those from metadata extraction during
-            # actualy ingest anyway.
-            exposure_id = int(match.group(1)) // 100
-            exposure_id -= exposure_id % 2
-            previous_path = result.setdefault(exposure_id, path.parent)
-            if previous_path != path.parent:
-                if (best_path := self._resolve_duplicates(previous_path, path.parent)) is not None:
-                    result[exposure_id] = best_path
-                else:
-                    raise RuntimeError(f"Found multiple directory paths ({previous_path}, {path.parent}) "
-                                       f"for exposure {exposure_id}.")
-        return result
+        # HSC visit/exposure IDs are always even-numbered, to allow for
+        # more than 100 CCDs while otherwise using the same pattern as the
+        # old Supreme-Cam.  The CCD identifiers here aren't the
+        # pure-integer ones we prefer to use in the pipelines, so we ignore
+        # them entirely; we'll get those from metadata extraction during
+        # actualy ingest anyway.
+        exposure_id = int(match.group(1)) // 100
+        exposure_id -= exposure_id % 2
+        return exposure_id
 
     def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
         # Docstring inherited.

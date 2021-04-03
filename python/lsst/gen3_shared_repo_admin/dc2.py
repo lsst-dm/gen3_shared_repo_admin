@@ -24,6 +24,7 @@ from __future__ import annotations
 __all__ = ("raw_operations", "refcat_operations", "umbrella_operations", "calib_operations",
            "rerun_operations_DP0")
 
+import itertools
 import os
 from pathlib import Path
 import textwrap
@@ -31,13 +32,14 @@ from typing import Dict, Iterator, Set, TYPE_CHECKING
 
 from .calibs import ConvertCalibrations, WriteCuratedCalibrations
 from .common import DefineChain, Group
-from .ingest import DefineRawTag, ExposureFinder, RawIngest
+from .ingest import DefineRawTag, ExposureFinder, RawIngest, UnstructuredExposureFinder
 from .refcats import RefCatIngest
 from .reruns import ConvertRerun
 from .visits import DefineVisits
 from . import doc_templates
 
 if TYPE_CHECKING:
+    import re
     from ._operation import AdminOperation
     from ._tool import RepoAdminTool
 
@@ -54,7 +56,7 @@ class _ExposureFinder(ExposureFinder):
     Parameters
     ----------
     root : `str`
-        Root path to search; expected to directly containing subdirectories
+        Root path to search; expected to directly contain subdirectories
         that each map to exactly one exposure (with the exposure ID as the
         subdirectory name).
     file_pattern : `str`
@@ -79,6 +81,76 @@ class _ExposureFinder(ExposureFinder):
         return set(self.recursive_glob(tool, path, self._file_pattern, follow_symlinks=True))
 
 
+class _NaiveExposureFinder(UnstructuredExposureFinder):
+    """An `ExposureFinder` implementation for DC2 data that isn't organized
+    into per-exposure directories, but also isn't very big so we don't have
+    to care about scanning those directories multiple times.
+
+    Parameters
+    ----------
+    root : `str`
+        Root path to search for matching files.
+    """
+
+    def __init__(self, root: str, *, has_band_suffix: bool, allow_incomplete: bool = False):
+        super().__init__(
+            Path(root),
+            self.FILE_REGEX_BAND_SUFFIX if has_band_suffix else self.FILE_REGEX_NO_BAND_SUFFIX,
+        )
+        self._allow_incomplete = allow_incomplete
+        self._has_band_suffix = has_band_suffix
+
+    FILE_REGEX_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}_[ugrizy].fits"
+
+    FILE_REGEX_NO_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}.fits"
+
+    DETECTOR_NAMES = set(
+        f"{r}_{s}" for r, s in itertools.product(
+            (
+                f"R{i}{j}" for i, j in itertools.product(range(5), range(5))
+                if (i, j) not in set(itertools.product([0, 4], [0, 4]))
+            ),
+            (
+                f"S{i}{j}" for i, j in itertools.product(range(3), range(3))
+            ),
+        )
+    )
+
+    def extract_exposure_id(self, tool: RepoAdminTool, match: re.Match) -> int:
+        # Docstring inherited.
+        return int(match.group(1))
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        base = found[exposure_id]
+        result = set()
+        band = None
+        for detector_name in self.DETECTOR_NAMES:
+            if not self._has_band_suffix:
+                path = base.joinpath(f"lsst_a_{exposure_id}_{detector_name}.fits")
+                if path.exists():
+                    result.add(path)
+                elif not self._allow_incomplete:
+                    raise FileNotFoundError(f"Missing raw with detector={detector_name} for {exposure_id}.")
+            elif band is None:
+                for trial_band in "ugrizy":
+                    path = base.joinpath(f"lsst_a_{exposure_id}_{detector_name}_{trial_band}.fits")
+                    if path.exists():
+                        band = trial_band
+                        result.add(path)
+                        break
+                else:
+                    raise FileNotFoundError(f"Missing raw with detector={detector_name} for {exposure_id}.")
+            else:
+                path = base.joinpath(f"lsst_a_{exposure_id}_{detector_name}_{band}.fits")
+                if path.exists():
+                    result.add(path)
+                elif not self._allow_incomplete:
+                    raise FileNotFoundError(f"Missing raw with detector={detector_name} (assuming band "
+                                            f"{band}) for {exposure_id}.")
+        return result
+
+
 def raw_operations() -> Group:
     """Helper function that returns all raw ingest admin operations for
     the DC2 data repository.
@@ -95,6 +167,18 @@ def raw_operations() -> Group:
     monthly_finder = _ExposureFinder(
         "/datasets/DC2/repoRun2.2i/raw",
         "*-R??-S??-det???.fits",
+    )
+    raw_calibs_flats_finder = _NaiveExposureFinder(
+        "/project/czw/dataDirs/DC2_raw_calibs/calibration_data",
+        has_band_suffix=True,
+    )
+    raw_calibs_others_finder = _NaiveExposureFinder(
+        "/project/czw/dataDirs/DC2_raw_calibs/calibration_data",
+        has_band_suffix=False,
+    )
+    raw_calibs_bf_finder = _NaiveExposureFinder(
+        "/project/czw/dataDirs/DC2_raw_calibs/bf_flats_20190408",
+        has_band_suffix=True,
     )
     return Group(
         "2.2i", (
@@ -132,6 +216,31 @@ def raw_operations() -> Group:
                             "See DM-22954 for more information."
                         ),
                     ),
+                    Group(
+                        "2.2i-raw-calibs", (
+                            RawIngest(
+                                "2.2i.raw-calibs-flats",
+                                raw_calibs_flats_finder,
+                                instrument_name="LSSTCam-imSim",
+                                collection="2.2i/raw/all",
+                                transfer="copy",
+                            ),
+                            RawIngest(
+                                "2.2i.raw-calibs-others",
+                                raw_calibs_others_finder,
+                                instrument_name="LSSTCam-imSim",
+                                collection="2.2i/raw/all",
+                                transfer="copy",
+                            ),
+                            RawIngest(
+                                "2.2i.raw-calibs-bf",
+                                raw_calibs_bf_finder,
+                                instrument_name="LSSTCam-imSim",
+                                collection="2.2i/raw/all",
+                                transfer="copy",
+                            ),
+                        ),
+                    )
                 ),
             ),
         )
