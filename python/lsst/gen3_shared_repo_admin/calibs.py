@@ -25,7 +25,7 @@ __all__ = ("CalibrationOperation", "ConvertCalibrations", "WriteCuratedCalibrati
 
 import logging
 import re
-from typing import Any, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Mapping, Optional, Tuple, TYPE_CHECKING
 
 from ._operation import AdminOperation, SimpleStatus
 
@@ -114,15 +114,21 @@ class ConvertCalibrations(CalibrationOperation):
         Path to the calibration repo, either absolute or relative to ``root``.
     collection_prefix : `str`, optional
         Collection name prefix to use instead of the instrument name.
+    dataset_type_names : `tuple` [ `str` ], optional
+        Dataset types to convert.
+    dataset_tyemplate_overrides : `dict` [ `str`, `str` ]
+        Mapping from dataset type name to an override file template for it.
     """
     def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...], root: str, repo_path: str,
-                 collection_prefix: Optional[str] = None):
+                 collection_prefix: Optional[str] = None,
+                 dataset_type_names: Tuple[str, ...] = ("flat", "bias", "dark", "fringe", "sky"),
+                 dataset_template_overrides: Optional[Mapping[str, str]] = None):
         super().__init__(name, instrument_name=instrument_name, labels=labels,
                          collection_prefix=collection_prefix)
         self._repo_path = repo_path
         self._root = root
-
-    DATASET_TYPE_NAMES = ("flat", "bias", "dark", "fringe", "sky")
+        self._dataset_type_names = dataset_type_names
+        self._dataset_template_overrides = dataset_template_overrides
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
@@ -133,9 +139,8 @@ class ConvertCalibrations(CalibrationOperation):
         logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
         logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
         task = self.make_task(tool)
-        if not tool.dry_run:
-            with SimpleStatus.run_context(self, tool):
-                task.run(self._root, calibs=[self.make_repo_struct(tool)], reruns=[], processes=tool.jobs)
+        with SimpleStatus.run_context(self, tool):
+            task.run(self._root, calibs=[self.make_repo_struct(tool)], reruns=[], processes=tool.jobs)
 
     def cleanup(self, tool: RepoAdminTool) -> None:
         # Docstring inherited
@@ -181,9 +186,12 @@ class ConvertCalibrations(CalibrationOperation):
         instrument.applyConfigOverrides(ConvertRepoTask._DefaultName, config)
         config.transfer = "direct"
         config.doMakeUmbrellaCollection = False
-        config.datasetIncludePatterns = self.DATASET_TYPE_NAMES
+        config.datasetIncludePatterns = self._dataset_type_names
         config.datasetIgnorePatterns.append("*_camera")
         config.datasetIgnorePatterns.append("yBackground")
         config.datasetIgnorePatterns.append("fgcmLookUpTable")
+        config.datasetTemplateOverrides = self._dataset_template_overrides
+        tool.log.debug("Included datasets: %s", config.datasetIncludePatterns)
+        tool.log.debug("Ignored datasets: %s", config.datasetIgnorePatterns)
         return ConvertRepoTask(config=config, butler3=tool.butler, instrument=instrument,
                                dry_run=tool.dry_run, **kwargs)
