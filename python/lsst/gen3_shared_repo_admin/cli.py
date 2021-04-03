@@ -75,23 +75,35 @@ class ConsoleProgressHandler(ProgressHandler):
 @click.argument("name", type=str)
 @click.option("--date", type=str, envvar="LSST_BUTLER_ADMIN_DATE")
 @click.option("--site", type=str, envvar="LSST_BUTLER_ADMIN_SITE")
-@click.option("--verbose", is_flag=True)
+@click.option("-v", "--verbose", count=True)
 @click.option("--work-root", type=click.Path(dir_okay=True, file_okay=False, exists=True, writable=True),
               envvar="LSST_BUTLER_ADMIN_WORK_ROOT")
 @click.option("-n", "--dry-run", is_flag=True)
 @click.option("-j", "--jobs", type=int, default=1)
 @click.option("--status", is_flag=True)
 @click.option("--cleanup", is_flag=True)
-def cli(repo: str, name: str, date: str, site: str, verbose: bool, work_root: str, dry_run: bool,
+def cli(repo: str, name: str, date: str, site: str, verbose: int, work_root: str, dry_run: bool,
         jobs: int, status: bool, cleanup: bool):
+    if dry_run:
+        verbose = max(verbose, 1)
+    console_level = {0: "WARN", 1: "INFO", 2: "DEBUG"}[verbose]
     lsst.log.configure_prop(
         _LOG_PROP.format(
             log_file=f"{work_root}/{repo}_{date}.log",
-            console_level="INFO" if dry_run or verbose else "WARN"
+            console_level=console_level,
         )
     )
+    unwanted_lsst_loggers = ["afw.cameraGeom.TransformMap"]
+    for logger_name in unwanted_lsst_loggers:
+        logger = lsst.log.getLogger(logger_name)
+        logger.setLevel(logger.FATAL)
+    unwanted_python_loggers = ["matplotlib", "lsst.daf.butler.core.config",
+                               "lsst.daf.butler.registry.versions"]
+    for logger_name in unwanted_python_loggers:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.FATAL)
     python_logger = logging.getLogger()
-    python_logger.setLevel(logging.INFO)
+    python_logger.setLevel({0: logging.WARN, 1: logging.INFO, 2: logging.DEBUG}[verbose])
     python_logger.addHandler(lsst.log.LogHandler())
     Progress.set_handler(ConsoleProgressHandler())
     dry_run = dry_run or status
