@@ -344,6 +344,24 @@ def calib_operations() -> Group:
                 root=root,
                 repo_path=os.path.join(root, "CALIB"),
                 collection_prefix="2.2i",
+                dataset_type_names=("flat", "bias", "dark", "fringe"),
+            ),
+            ConvertCalibrations(
+                name="2.2i-calibs-sky",
+                instrument_name="LSSTCam-imSim",
+                labels=("gen2",),
+                root=root,
+                repo_path=os.path.join(root, "CALIB"),
+                collection_prefix="2.2i",
+                dataset_type_names=("sky",),
+                # obs_lsst master has different templates, and these names
+                # didn't get patched with the rest of the DC2 DP0 patching.
+                # But overriding here is better than patching anyway - it just
+                # wasn't an option when everything else was converted.
+                dataset_template_overrides={
+                    "sky": ("SKY/%(calibDate)s/%(filter)s/SKY-%(calibDate)s-%(filter)s"
+                            "-%(raftName)s-%(detectorName)s-det%(detector)03d_%(calibDate)s.fits"),
+                }
             ),
             DefineChain(
                 "2.2i-calibs-default",
