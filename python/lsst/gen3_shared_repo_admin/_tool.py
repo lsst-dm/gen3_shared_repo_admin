@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 from lsst.daf.butler import Butler, Progress
 
 from ._operation import OperationNotReadyError
-from .definitions import REPOS
+from .sites import REPOS
 
 if TYPE_CHECKING:
     from ._repo_definition import RepoDefinition

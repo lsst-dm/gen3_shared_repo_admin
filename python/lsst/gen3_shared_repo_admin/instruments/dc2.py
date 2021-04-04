@@ -30,18 +30,18 @@ from pathlib import Path
 import textwrap
 from typing import Dict, Iterator, Set, TYPE_CHECKING
 
-from .calibs import ConvertCalibrations, WriteCuratedCalibrations
-from .common import DefineChain, Group
-from .ingest import DefineRawTag, ExposureFinder, RawIngest, UnstructuredExposureFinder
-from .refcats import RefCatIngest
-from .reruns import ConvertRerun
-from .visits import DefineVisits
-from . import doc_templates
+from ..calibs import ConvertCalibrations, WriteCuratedCalibrations
+from ..common import DefineChain, Group
+from ..ingest import DefineRawTag, ExposureFinder, RawIngest, UnstructuredExposureFinder
+from ..refcats import RefCatIngest
+from ..reruns import ConvertRerun
+from ..visits import DefineVisits
+from .. import doc_templates
 
 if TYPE_CHECKING:
     import re
-    from ._operation import AdminOperation
-    from ._tool import RepoAdminTool
+    from .._operation import AdminOperation
+    from .._tool import RepoAdminTool
 
 
 class _ExposureFinder(ExposureFinder):

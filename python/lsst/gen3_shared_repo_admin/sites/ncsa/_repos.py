@@ -19,7 +19,22 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._site_definition import SiteDefinition
-from ._repo_definition import RepoDefinition
-from ._tool import RepoAdminTool
-from . import sites
+from __future__ import annotations
+
+__all__ = ("repos",)
+
+from typing import Iterator
+
+from ..._repo_definition import RepoDefinition
+
+from . import ccso
+from . import dc2
+from . import main
+from . import teststand
+
+
+def repos() -> Iterator[RepoDefinition]:
+    yield from ccso.repos()
+    yield from dc2.repos()
+    yield from main.repos()
+    yield from teststand.repos()

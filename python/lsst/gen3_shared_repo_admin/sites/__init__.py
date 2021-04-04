@@ -19,7 +19,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._site_definition import SiteDefinition
-from ._repo_definition import RepoDefinition
-from ._tool import RepoAdminTool
-from . import sites
+__all__ = ()
+
+from ._repos import REPOS

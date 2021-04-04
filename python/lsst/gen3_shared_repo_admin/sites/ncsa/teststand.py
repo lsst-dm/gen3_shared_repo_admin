@@ -19,7 +19,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._site_definition import SiteDefinition
-from ._repo_definition import RepoDefinition
-from ._tool import RepoAdminTool
-from . import sites
+from __future__ import annotations
+
+__all__ = ()
+
+from typing import Iterator, TYPE_CHECKING
+
+from ..._repo_definition import RepoDefinition
+from ... import common
+from ._site import NCSA
+
+if TYPE_CHECKING:
+    from ._operation import AdminOperation
+
+
+def operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
+    yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
+    yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
+
+
+def repos() -> Iterator[RepoDefinition]:
+    yield RepoDefinition(name="teststand", date="20210215", site=NCSA, operations=operations)
