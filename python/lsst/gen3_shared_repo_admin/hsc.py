@@ -416,7 +416,8 @@ def rc2_tags() -> Group:
             f"HSC-tags-RC2-raw-{tract_id}",
             f"HSC/raw/RC2/{tract_id}",
             [
-                (("raw",), dict(instrument="HSC", collections=["HSC/raw/all"], exposure=v))
+                (("raw",), dict(instrument="HSC", collections=["HSC/raw/all"], exposure=v,
+                                where="detector != 9 AND detector.purpose='SCIENCE'"))
                 for v in RC2_VISITS[tract_id]
             ],
             doc=(
