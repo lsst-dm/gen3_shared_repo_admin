@@ -103,7 +103,9 @@ def cli(repo: str, name: str, date: str, site: str, verbose: int, work_root: str
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.FATAL)
     python_logger = logging.getLogger()
-    python_logger.setLevel({0: logging.WARN, 1: logging.INFO, 2: logging.DEBUG}[verbose])
+    # logging.INFO at verbose=0 is intentional here; that's what controls our
+    # progress bars.
+    python_logger.setLevel({0: logging.INFO, 1: logging.INFO, 2: logging.DEBUG}[verbose])
     python_logger.addHandler(lsst.log.LogHandler())
     Progress.set_handler(ConsoleProgressHandler())
     dry_run = dry_run or status
