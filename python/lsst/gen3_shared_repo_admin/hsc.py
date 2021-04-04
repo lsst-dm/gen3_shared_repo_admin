@@ -601,6 +601,7 @@ def generate() -> Iterator[AdminOperation]:
             Group(
                 "HSC-rerun",
                 (
+                    rc2_rerun("w_2021_10", "DM-29074", {"-sfm": "sfm", "": "rest"}),
                     rc2_rerun("w_2021_06", "DM-28654", {"-sfm": "sfm", "": "rest"}),
                     rc2_rerun("w_2021_02", "DM-28282", {"-sfm": "sfm", "": "rest"}),
                     rc2_rerun("w_2020_50", "DM-28140", {"-sfm": "sfm", "": "rest"}),
