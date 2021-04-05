@@ -19,6 +19,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+"""Definitions for ``/repo/ccso`` at NCSA.
+
+This repository includes only LSST raws written out by the CCS with
+``controller='O'``; these cannot be included in the same data repository as
+other real data because their data IDs conflict with the primary versions
+of those raws.
+"""
+
 from __future__ import annotations
 
 __all__ = ()
@@ -33,12 +41,17 @@ if TYPE_CHECKING:
     from ._operation import AdminOperation
 
 
+def repos() -> Iterator[RepoDefinition]:
+    """Generate the definitions for the `/repo/ccso` data repository at NCSA.
+    """
+    yield RepoDefinition(name="ccso", date="20210215", site=NCSA, operations=operations)
+
+
 def operations() -> Iterator[AdminOperation]:
+    """Generate all operations used to set up the `/repo/ccso` data repository
+    at NCSA.
+    """
     yield common.CreateRepo()
     yield common.RegisterInstrument("LSSTCam-registration", "lsst.obs.lsst.LsstCam")
     yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
     yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
-
-
-def repos() -> Iterator[RepoDefinition]:
-    yield RepoDefinition(name="ccso", date="20210215", site=NCSA, operations=operations)

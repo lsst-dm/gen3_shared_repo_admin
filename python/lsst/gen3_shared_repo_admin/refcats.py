@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-__all__ = ("RefCatIngest",)
+__all__ = ("RefCatIngest", "ingest_refcats")
 
 import os
 from pathlib import Path
@@ -29,10 +29,43 @@ import re
 from typing import Iterable, Iterator, TYPE_CHECKING
 
 from ._operation import AdminOperation, SimpleStatus
-from .common import DefineChain, Group
+from . import common
 
 if TYPE_CHECKING:
     from ._tool import RepoAdminTool
+
+
+@common.Group.wrap("refcats")
+def ingest_refcats(ticket: str, root: Path, names: Iterable[str]) -> Iterator[AdminOperation]:
+    """Ingest a suite of reference catalogs and define the collections that
+    provide access to them.
+
+    This function should be used instead of directly creating the operation
+    classes in this module when possible.
+
+    Parameters
+    ----------
+    ticket : `str`
+        Ticket name on which ingest was done; used as part of the collection
+        name.
+    path : `Path`
+        Full path to the directory containing sharded reference catalog files.
+    names : `Iterable` [ `str` ]
+        Names of the reference catalogs to ingest; these should correspond
+        exactly to the names of subdirectories of ``path``.
+    """
+    for name in names:
+        yield RefCatIngest(
+            name,
+            path=root.joinpath(name),
+            collection=f"refcats/{ticket}",
+        )
+    yield common.DefineChain(
+        "refcats-chain",
+        "refcats",
+        (f"refcats/{ticket}",),
+        doc="Umbrella collection for all active reference catalogs.",
+    )
 
 
 class RefCatIngest(AdminOperation):
@@ -99,24 +132,3 @@ class RefCatIngest(AdminOperation):
                 tool.butler.registry.registerCollection(self.collection, CollectionType.RUN)
                 tool.butler.registry.registerDatasetType(dataset_type)
                 tool.butler.ingest(*datasets, transfer="direct", run=self.collection)
-
-
-def generate(ticket: str, root: Path, names: Iterable[str]) -> Iterator[AdminOperation]:
-    ingests = tuple(
-        RefCatIngest(
-            name,
-            path=Path(f"/datasets/refcats/htm/v1/{name}"),
-            collection=f"refcats/{ticket}",
-        )
-        for name in names
-    )
-    chain = DefineChain(
-        "refcats-chain",
-        "refcats",
-        (f"refcats/{ticket}",),
-        doc="Umbrella collection for all active reference catalogs.",
-    )
-    return Group(
-        "refcats",
-        ingests + (chain,)
-    ).flatten()

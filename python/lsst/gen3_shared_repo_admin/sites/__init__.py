@@ -19,6 +19,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+"""Concrete definitions of data repositories at specific sites.
+
+The subpackages of this package should correspond directly to compute sites
+that host data repositories.  The `RepoDefinition` objects that aggregate these
+definitions must be added to the ``REPOS`` dictionary exported directly by this
+package.
+"""
+
 __all__ = ()
 
 from ._repos import REPOS

@@ -112,7 +112,7 @@ class Group(AdminOperation):
         def decorator(generator: Callable[..., Iterator[AdminOperation]]):
             @functools.wraps(generator)
             def wrapper(*args, **kwargs) -> Iterator[AdminOperation]:
-                yield from Group(name, generator(*args, **kwargs)).flatten()
+                yield Group(name, generator(*args, **kwargs))
             return wrapper
         return decorator
 

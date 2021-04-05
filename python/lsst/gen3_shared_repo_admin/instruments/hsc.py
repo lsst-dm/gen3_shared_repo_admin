@@ -21,7 +21,13 @@
 
 from __future__ import annotations
 
-__all__ = ("generate",)
+__all__ = (
+    "HyperSuprimeCamExposureFinder",
+    "ingest_raws",
+    "IngestBrightObjectMasks",
+    "define_rc2_tags",
+    "WriteStrayLightData",
+)
 
 from collections import defaultdict
 import logging
@@ -31,12 +37,9 @@ import textwrap
 from typing import Any, Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING
 
 from .._operation import AdminOperation, OperationNotReadyError, SimpleStatus
-from ..ingest import RawIngest, ExposureFinder, UnstructuredExposureFinder
-from ..calibs import CalibrationOperation, ConvertCalibrations, WriteCuratedCalibrations
-from ..common import Group, RegisterInstrument, DefineChain, DefineTag, IngestFiles
-from ..visits import DefineVisits
-from ..reruns import ConvertRerun
-from .. import doc_templates
+from .. import ingest
+from .. import calibs
+from .. import common
 
 if TYPE_CHECKING:
     import re
@@ -45,11 +48,60 @@ if TYPE_CHECKING:
     from .._tool import RepoAdminTool
 
 
-class _ExposureFinder(UnstructuredExposureFinder):
-    """An `ExposureFinder` implementation for HSC data (and possibly,
-    accidentally, the way some of it is organized at NCSA).
+def ingest_raws(
+    name: str,
+    path: Path,
+    *,
+    save_found: bool = False,
+    split_into: Optional[int] = None,
+    transfer: Optional[str] = "direct",
+    **kwargs: Any,
+) -> Iterator[AdminOperation]:
+    """Generate one or more operations that ingest HSC raws.
 
-    This finder  expects many exposures to be present in directories, and makes
+    This is an HSC-specific variant of `ingest.ingest_raws` provided for
+    convenience.  It always uses the `HyperSuprimeCamExposureFinder` (taking a
+    `Path` argument instead of the ``finder`` argument of
+    `ingest.ingest_raws`), never creates
+    `~lsst.daf.butler.CollectionType.TAGGED` collections (for HSC, these are
+    created from explicit lists of exposures and patterns for good detectors;
+    see e.g. `define_rc2_tags`).
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the primary ingest operation; related operations will have
+        names derived from this by adding suffixes.
+    path : `Path`
+        Path to search (recursively) for raws.
+    instrument_name: `str`
+        Name of the instrument.
+    save_found : `bool`, optional
+        If `True`, save the exposures found by ``finder`` to a file in a
+        helper operation, allowing any filesystem scanning to only happen once.
+    split_into : `int`, optional
+        If not `None`, split the ingest operation into this many (roughly)
+        evenly-sized steps, each of which can be run in parallel.
+    transfer : `str` or `None`, optional
+        Transfer mode for ingest.
+    **kwargs
+        Additional keyword arguments are forwarded to
+        `HyperSuprimeCamExposureFinder`.
+
+    Returns
+    -------
+    operations : `Iterator` [ `AdminOperation` ]
+        Operations that ingest HSC raws.
+    """
+    finder = HyperSuprimeCamExposureFinder(path, **kwargs)
+    yield from ingest.ingest_raws(name, finder, instrument_name="HSC", save_found=save_found,
+                                  split_into=split_into, transfer=transfer)
+
+
+class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
+    """An `ExposureFinder` implementation for HSC data.
+
+    This finder expects many exposures to be present in directories, and makes
     no assumptions about how those directories are organized.  It does assume
     that the filenames themselves are the original ``HSCA*.fits`` names,
     allowing exposure IDs to be derived from those names.  Symbolic links are
@@ -106,53 +158,22 @@ class _ExposureFinder(UnstructuredExposureFinder):
         return result
 
 
-def reject_domeflat_duplicates(a: Path, b: Path) -> Optional[Path]:
-    """Some HSC raw paths (at least at NCSA) have duplicates of some raws,
-    with some appearing in a 'domeflat' subdirectory.  This function selects
-    those that aren't in those subdirectories.
-    """
-    if "domeflat" in str(a):
-        return b
-    if "domeflat" in str(b):
-        return a
-    return None
-
-
-def raw_ingest(subdir: str, top: Path = Path("/datasets/hsc/raw"), **kwargs) -> RawIngest:
-    """Helper function to generate a `RawIngest` appropriate for finding
-    HSC raws (recursively) in a directory.
-
-    Parameters
-    ----------
-    subdir : `str`
-        Subdirectory of ``top`` to search.  Also used as the operation name.
-    top : `str`, optional
-        Root directory for all raws for this instrument.
-    **kwargs
-        Additional keyword arguments forwarded to the exposure finder
-        constructor.
-
-    Returns
-    -------
-    ingest : `RawIngest`
-        A raw ingest operation.
-    """
-    return RawIngest(
-        f"HSC-raw-{subdir}",
-        _ExposureFinder(top.joinpath(subdir), **kwargs),
-        instrument_name="HSC",
-    ).save_found()
-
-
-class WriteStrayLightData(CalibrationOperation):
+class WriteStrayLightData(calibs.CalibrationOperation):
     """A concrete `AdminOperation` that copies HSC's special y-band stray light
     data file from a Gen2 repo.
 
-    This operation assumes it is the only operation working with its output
-    collections.
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    labels : `tuple` [ `str` ]
+        Tuple of strings to include in the collection name(s).
+    directory : `Path`
+        Directory that directly contains stray-light data files.
     """
 
-    def __init__(self, name: str, labels: Tuple[str, ...], directory: str):
+    def __init__(self, name: str, labels: Tuple[str, ...], directory: Path):
         super().__init__(name, "HSC", labels)
         self.directory = directory
 
@@ -166,47 +187,10 @@ class WriteStrayLightData(CalibrationOperation):
             with SimpleStatus.run_context(self, tool):
                 self.instrument(tool).ingestStrayLightData(
                     tool.butler,
-                    directory=self.directory,
+                    directory=str(self.directory),
                     transfer="direct",
                     labels=self.labels,
                 )
-
-
-def convert_calibs(subdir: str, top="/datasets/hsc/calib", root="/datasets/hsc/repo") -> Group:
-    """Helper function to generate a `ConvertCalibrations` appropriate for a
-    Gen2 HSC calibration repo.
-
-    Parameters
-    ----------
-    subdir : `str`
-        Subdirectory of ``top`` that contains the calibration repo.  Also used
-        as the operation name.
-    top : `str`, optional
-        Root directory for all raws for this instrument.
-    root : `str`, optional
-        Path to the HSC Gen2 repository root.
-
-    Returns
-    -------
-    group : `Group`
-        A group of calibration conversion operations.
-    """
-    return Group(
-        f"HSC-calibs-{subdir}", (
-            ConvertCalibrations(
-                name=f"HSC-calibs-{subdir}-convert",
-                instrument_name="HSC",
-                labels=("gen2", subdir),
-                root=root,
-                repo_path=os.path.join(root, top, subdir),
-            ),
-            WriteStrayLightData(
-                name=f"HSC-calibs-{subdir}-straylight",
-                labels=("gen2", subdir),
-                directory=os.path.join(top, subdir, "STRAY_LIGHT"),
-            ),
-        )
-    )
 
 
 class IngestBrightObjectMasks(AdminOperation):
@@ -217,7 +201,7 @@ class IngestBrightObjectMasks(AdminOperation):
     name : `str`
         Name of the operation.  Should include any parent-operation prefixes
         (see `AdminOperation` documentation).
-    root : `str`
+    root : `Path`
         Directory that directly contains subdirectories that correspond to
         tracts.
     collection : `str`
@@ -227,7 +211,7 @@ class IngestBrightObjectMasks(AdminOperation):
         the masks are defined on.
     """
 
-    def __init__(self, name: str, root: str, collection: str, skymap_name: str = "hsc_rings_v1"):
+    def __init__(self, name: str, root: Path, collection: str, skymap_name: str = "hsc_rings_v1"):
         super().__init__(name)
         self._root = root
         self._collection = collection
@@ -301,8 +285,8 @@ class IngestBrightObjectMasks(AdminOperation):
                 n_patches_x, _ = skyMap[tract_id].getNumPatches()
                 file_regex = self.FILE_REGEX_TEMPLATE.format(tract_id=tract_id)
                 found = defaultdict(set)
-                for path, match in ExposureFinder.recursive_regex(tool, tract_root, file_regex,
-                                                                  follow_symlinks=True):
+                for path, match in ingest.ExposureFinder.recursive_regex(tool, tract_root, file_regex,
+                                                                         follow_symlinks=True):
                     band = filters[match.group("filter")]
                     patch_id = int(match.group("y"))*n_patches_x + int(match.group("x"))
                     data_id = DataCoordinate.standardize(skymap=self._skymap_name, tract=tract_id,
@@ -341,6 +325,44 @@ class IngestBrightObjectMasks(AdminOperation):
         if not tool.dry_run:
             tool.butler.removeRuns([self._collection], unstore=False)
             SimpleStatus.cleanup(self, tool)
+
+
+@common.Group.wrap("HSC-tags-RC2")
+def define_rc2_tags() -> Iterator[AdminOperation]:
+    """Generate operations that define ``TAGGED`` collections for the HSC RC2
+    subset.
+
+    Returns
+    -------
+    operations : `Iterator` [ `AdminOperation` ]
+        Operations that tag the HSC RC2 subset.
+    """
+    for tract_id, tract_name in [
+        (9615, "GAMA 15H (Wide)"),
+        (9697, "VVDS (Wide)"),
+        (9813, "COSMOS (UltraDeep)")
+    ]:
+        yield common.DefineTag(
+            f"HSC-tags-RC2-raw-{tract_id}",
+            f"HSC/raw/RC2/{tract_id}",
+            [
+                (("raw",), dict(instrument="HSC", collections=["HSC/raw/all"], exposure=v,
+                                where="detector != 9 AND detector.purpose='SCIENCE'"))
+                for v in RC2_VISITS[tract_id]
+            ],
+            doc=textwrap.fill(
+                "Raws included in the Release Candidate 2 medium-scale test dataset "
+                f"(see DM-11345), overlapping tract {tract_id} in {tract_name}."
+            ),
+        )
+    yield common.DefineChain(
+        "HSC-tags-RC2-raw",
+        "HSC/raw/RC2",
+        tuple(f"HSC/raw/RC2/{tract_id}" for tract_id in RC2_VISITS.keys()),
+        doc=textwrap.fill(
+            "Raws included in the Release Candidate 2 medium-scale test dataset (see DM-11345)."
+        )
+    )
 
 
 RC2_VISITS = {
@@ -400,214 +422,3 @@ RC2_VISITS = {
         22664,
     ],
 }
-
-
-def rc2_tags() -> Group:
-    """Helper function that returns operations that tag the raws for the RC2
-    datasets.
-
-    Returns
-    -------
-    group : `Group`
-        A group of admin operations.
-    """
-    per_tract = tuple(
-        DefineTag(
-            f"HSC-tags-RC2-raw-{tract_id}",
-            f"HSC/raw/RC2/{tract_id}",
-            [
-                (("raw",), dict(instrument="HSC", collections=["HSC/raw/all"], exposure=v,
-                                where="detector != 9 AND detector.purpose='SCIENCE'"))
-                for v in RC2_VISITS[tract_id]
-            ],
-            doc=(
-                "Raws included in the Release Candidate 2 medium-scale test dataset "
-                f"(see DM-11345), overlapping tract {tract_id} in {tract_name}."
-            ),
-        )
-        for tract_id, tract_name in [
-            (9615, "GAMA 15H (Wide)"), (9697, "VVDS (Wide)"), (9813, "COSMOS (UltraDeep)")
-        ]
-    )
-    all_tracts = DefineChain(
-        "HSC-tags-RC2-raw",
-        "HSC/raw/RC2",
-        tuple(f"HSC/raw/RC2/{tract_id}" for tract_id in RC2_VISITS.keys()),
-        doc="Raws included in the Release Candidate 2 medium-scale test dataset (see DM-11345)."
-    )
-    return Group(
-        "HSC-tags-RC2", per_tract + (all_tracts,)
-    )
-
-
-def rc2_rerun(weekly: str, ticket: str, steps: Dict[str, str]) -> Group:
-    """Helper function that returns operations that convert a single logical
-    Gen2 RC2 reprocessing rerun, assuming its child reruns form a consistent
-    pattern.
-
-    Parameters
-    ----------
-    weekly : `str`
-        Weekly tag string (e.g. ``w_2021_06``).
-    ticket : `str`
-        Ticket number for the processing run.
-    steps : `dict`
-        Dictionary mapping child rerun suffixes (e.g. ``"-sfm"`` or ``""``)
-        to the names used for Gen3 ``RUN`` collections and operation names.
-
-    Returns
-    -------
-    group : `Group`
-        A group of admin operations.
-    """
-    reruns = tuple(
-        ConvertRerun(
-            f"HSC-rerun-RC2-{weekly}-{v}",
-            instrument_name="HSC",
-            root="/datasets/hsc/repo",
-            repo_path=f"rerun/RC/{weekly}/{ticket}{k}",
-            run_name=f"HSC/runs/RC2/{weekly}/{ticket}/{v}",
-            include=("*",),
-            exclude=("*_metadata", "raw", "brightObjectMask", "ref_cat"),
-        )
-        for k, v in steps.items()
-    )
-    chain = DefineChain(
-        f"HSC-rerun-RC2-{weekly}-chain",
-        f"HSC/runs/RC2/{weekly}/{ticket}",
-        (
-            tuple(f"HSC/runs/RC2/{weekly}/{ticket}/{v}" for v in reversed(steps.values()))
-            + ("HSC/raw/RC2", "HSC/calib", "HSC/masks", "skymaps", "refcats")
-        ),
-        doc=textwrap.fill(
-            f"HSC RC2 processing with weekly {weekly} on ticket {ticket}, "
-            "(converted from Gen2 repo at /datasets/hsc/repo).",
-        ),
-        flatten=True,
-    )
-    return Group(f"HSC-rerun-RC2-{weekly}", reruns + (chain,))
-
-
-def rc2_fgcmcal_lut() -> AdminOperation:
-    return Group(
-        "HSC-fgcmlut-RC2", (
-            IngestFiles(
-                "HSC-fgcmlut-RC2-ingest",
-                collection="HSC/fgcmcal/lut/RC2/DM-28636",
-                dataset_type_name="fgcmLookUpTable",
-                dimensions={"instrument"},
-                storage_class="Catalog",
-                datasets={
-                    Path("/project/erykoff/rc2_gen3/fgcmlut/fgcm-process/fgcmLookUpTable.fits"):
-                        {"instrument": "HSC"}
-                },
-                transfer="copy",
-            ),
-            DefineChain(
-                "HSC-fgcmlut-RC2-chain",
-                "HSC/fgcmcal/lut/RC2",
-                ("HSC/fgcmcal/lut/RC2/DM-28636",),
-                doc="Default lookup table for FGCM over the RC2 dataset.",
-            ),
-        )
-    )
-
-
-def generate() -> Iterator[AdminOperation]:
-    """Helper function that yields all HSC-specific operations.
-
-    Returns
-    -------
-    group : `Group`
-        A group of admin operations.
-    """
-    return Group(
-        "HSC", (
-            RegisterInstrument("HSC-registration", "lsst.obs.subaru.HyperSuprimeCam"),
-            Group(
-                "HSC-raw", (
-                    raw_ingest("commissioning"),
-                    raw_ingest("cosmos"),
-                    raw_ingest("newhorizons", resolve_duplicates=reject_domeflat_duplicates),
-                    raw_ingest("ssp_extra"),
-                    raw_ingest("ssp_pdr1"),
-                    raw_ingest("ssp_pdr2"),
-                    raw_ingest("sxds-i2"),
-                )
-            ),
-            Group(
-                "HSC-calibs", (
-                    WriteCuratedCalibrations("HSC-calibs-curated", "HSC", labels=("DM-28636",)),
-                    convert_calibs("20180117"),
-                    convert_calibs("20200115"),
-                    DefineChain(
-                        "HSC-calibs-default",
-                        "HSC/calib", (
-                            "HSC/calib/gen2/20180117",
-                            "HSC/calib/DM-28636",
-                            "HSC/calib/gen2/20180117/unbounded",
-                            "HSC/calib/DM-28636/unbounded",
-                        ),
-                        doc=doc_templates.DEFAULT_CALIBS.format(instrument="HSC"),
-                    ),
-                    DefineChain(
-                        "HSC-calibs-default-unbounded",
-                        "HSC/calib/unbounded", (
-                            "HSC/calib/gen2/20180117/unbounded",
-                            "HSC/calib/DM-28636/unbounded",
-                        ),
-                        doc=doc_templates.DEFAULT_CALIBS_UNBOUNDED.format(instrument="HSC"),
-                    )
-                ),
-            ),
-            DefineVisits("HSC-visits", "HSC"),
-            Group(
-                "HSC-masks", (
-                    IngestBrightObjectMasks(
-                        "HSC-masks-s18a",
-                        "/datasets/hsc/BrightObjectMasks/GouldingMasksS18A",
-                        collection="HSC/masks/s18a",
-                    ),
-                    IngestBrightObjectMasks(
-                        "HSC-masks-arcturus",
-                        "/datasets/hsc/BrightObjectMasks/ArcturusMasks",
-                        collection="HSC/masks/arcturus",
-                    ),
-                    DefineChain(
-                        "HSC-masks-default",
-                        "HSC/masks",
-                        (
-                            "HSC/masks/s18a",
-                        ),
-                        doc="Recommended version of the HSC bright object masks.",
-                    ),
-                )
-            ),
-            DefineChain(
-                "HSC-defaults",
-                "HSC/defaults", (
-                    "HSC/raw/all", "HSC/calib", "HSC/masks", "refcats", "skymaps",
-                ),
-                doc=doc_templates.UMBRELLA.format(tail="all available HSC data.")
-            ),
-            rc2_fgcmcal_lut(),
-            rc2_tags(),
-            DefineChain(
-                "HSC-RC2-defaults",
-                "HSC/RC2/defaults", (
-                    "HSC/raw/RC2", "HSC/calib", "HSC/masks", "HSC/fgcmcal/lut/RC2", "refcats", "skymaps",
-                ),
-                doc=doc_templates.UMBRELLA.format(tail="the HSC RC2 test dataset.")
-            ),
-            Group(
-                "HSC-rerun",
-                (
-                    rc2_rerun("w_2021_10", "DM-29074", {"-sfm": "sfm", "": "rest"}),
-                    rc2_rerun("w_2021_06", "DM-28654", {"-sfm": "sfm", "": "rest"}),
-                    rc2_rerun("w_2021_02", "DM-28282", {"-sfm": "sfm", "": "rest"}),
-                    rc2_rerun("w_2020_50", "DM-28140", {"-sfm": "sfm", "": "rest"}),
-                    rc2_rerun("w_2020_42", "DM-27244", {"-sfm": "sfm", "": "rest"}),
-                )
-            ),
-        )
-    ).flatten()

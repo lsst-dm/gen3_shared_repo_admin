@@ -51,7 +51,8 @@ class RepoDefinition:
     """
 
     site: SiteDefinition
-    # TODO
+    """Definitions for the site that hosts this data repository.
+    """
 
     operations: Callable[[], Iterator[AdminOperation]]
     """Callable that returns an iterator over `AdminOperation` objects that

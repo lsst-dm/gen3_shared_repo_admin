@@ -34,6 +34,9 @@ from . import teststand
 
 
 def repos() -> Iterator[RepoDefinition]:
+    """Iterate over all concrete `RepoDefinition` objects defined by this
+    package.
+    """
     yield from ccso.repos()
     yield from dc2.repos()
     yield from main.repos()

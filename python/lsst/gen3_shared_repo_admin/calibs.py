@@ -24,6 +24,7 @@ from __future__ import annotations
 __all__ = ("CalibrationOperation", "ConvertCalibrations", "WriteCuratedCalibrations",)
 
 import logging
+from pathlib import Path
 import re
 from typing import Any, Mapping, Optional, Tuple, TYPE_CHECKING
 
@@ -108,9 +109,9 @@ class ConvertCalibrations(CalibrationOperation):
         Short (dimension) name of the instrument.
     labels : `tuple` [ `str` ]
         Tuple of strings to include in the collection name(s).
-    root : `str`
+    root : `Path`
         Root of the Gen2 repository suite (a non-calibration repo).
-    repo_path : `str`
+    repo_path : `Path`
         Path to the calibration repo, either absolute or relative to ``root``.
     collection_prefix : `str`, optional
         Collection name prefix to use instead of the instrument name.
@@ -119,7 +120,7 @@ class ConvertCalibrations(CalibrationOperation):
     dataset_tyemplate_overrides : `dict` [ `str`, `str` ]
         Mapping from dataset type name to an override file template for it.
     """
-    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...], root: str, repo_path: str,
+    def __init__(self, name: str, instrument_name: str, labels: Tuple[str, ...], root: Path, repo_path: Path,
                  collection_prefix: Optional[str] = None,
                  dataset_type_names: Tuple[str, ...] = ("flat", "bias", "dark", "fringe", "sky"),
                  dataset_template_overrides: Optional[Mapping[str, str]] = None):
@@ -140,7 +141,7 @@ class ConvertCalibrations(CalibrationOperation):
         logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
         task = self.make_task(tool)
         with SimpleStatus.run_context(self, tool):
-            task.run(self._root, calibs=[self.make_repo_struct(tool)], reruns=[], processes=tool.jobs)
+            task.run(str(self._root), calibs=[self.make_repo_struct(tool)], reruns=[], processes=tool.jobs)
 
     def cleanup(self, tool: RepoAdminTool) -> None:
         # Docstring inherited
@@ -171,7 +172,7 @@ class ConvertCalibrations(CalibrationOperation):
         """
         from lsst.obs.base.gen2to3 import CalibRepo
         return CalibRepo(
-            path=self._repo_path,
+            path=str(self._repo_path),
             curated=False,
             labels=self.labels,
             default=False,

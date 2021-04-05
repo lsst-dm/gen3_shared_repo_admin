@@ -19,5 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+"""Concrete definitions of data repositories at NCSA.
+
+This package contains one public submodule for each major data repository, as
+well as public submodules for some instruments within these.  The package-level
+`repos` function iterates over all nested `RepoDefinition` instances.
+"""
+
 from ._site import NCSA
 from ._repos import repos
