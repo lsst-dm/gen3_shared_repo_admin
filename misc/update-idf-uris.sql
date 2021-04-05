@@ -1,3 +1,8 @@
+-- Script to rewrite dataset URIs after uploading the NCSA /repo/dc2 database
+-- to the IDF.
+--
+-- THIS MAY NOW BE OUT OF DATE, AS THE IDF LOCATIONS HAVE CHANGED.
+
 -- Rule for raws.  These start with the usual, unpatched path in the NCSA
 -- database, but they go somewhere special at the IDF.
 UPDATE
