@@ -34,7 +34,9 @@ from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 from ..._repo_definition import RepoDefinition
+from ... import calibs
 from ... import common
+from ... import doc_templates
 from ... import refcats
 from ._site import NCSA
 from . import hsc
@@ -65,8 +67,38 @@ def operations() -> Iterator[AdminOperation]:
         )
     )
     yield from hsc.operations()
-    yield common.RegisterInstrument("LATISS-registration", "lsst.obs.lsst.Latiss")
-    yield common.RegisterInstrument("LSSTCam-registration", "lsst.obs.lsst.LsstCam")
-    yield common.RegisterInstrument("LSSTComCam-registration", "lsst.obs.lsst.LsstComCam")
-    yield common.RegisterInstrument("LSST-TS8-registration", "lsst.obs.lsst.LsstTS8")
-    yield common.RegisterInstrument("LSST-TS3-registration", "lsst.obs.lsst.LsstTS3")
+    yield from rubin_operations("LATISS", "lsst.obs.lsst.Latiss")
+    yield from rubin_operations("LSSTComCam", "lsst.obs.lsst.LsstComCam")
+    yield from rubin_operations("LSSTCam", "lsst.obs.lsst.LsstCam")
+    yield from rubin_operations("LSST-TS8", "lsst.obs.lsst.LsstTS8")
+    yield from rubin_operations("LSST-TS3", "lsst.obs.lsst.LsstTS3")
+
+
+def rubin_operations(name: str, class_name: str) -> Iterator[AdminOperation]:
+    """Generate operations used to set up a Rubin instrument in the
+    `/repo/main` repository.
+
+    This registers the instrument, writes curated calibrations, and sets up the
+    default calibration collection pointers to point to just that.
+    """
+    yield common.RegisterInstrument(f"{name}-registration", class_name)
+    yield common.Group(
+        f"{name}-calibs", (
+            calibs.WriteCuratedCalibrations(f"{name}-calibs-curated", name, labels=("DM-28636",)),
+            common.DefineChain(
+                f"{name}-calibs-default",
+                f"{name}/calib", (
+                    f"{name}/calib/DM-28636",
+                    f"{name}/calib/DM-28636/unbounded",
+                ),
+                doc=doc_templates.DEFAULT_CALIBS.format(instrument=name),
+            ),
+            common.DefineChain(
+                f"{name}-calibs-default-unbounded",
+                f"{name}/calib/unbounded", (
+                    f"{name}/calib/DM-28636/unbounded",
+                ),
+                doc=doc_templates.DEFAULT_CALIBS_UNBOUNDED.format(instrument=name),
+            ),
+        )
+    )
