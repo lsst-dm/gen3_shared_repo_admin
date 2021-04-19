@@ -19,7 +19,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._site_definition import SiteDefinition
-from ._repo_definition import RepoDefinition
-from ._tool import RepoAdminTool
-from . import sites
+__all__ = ("REPOS",)
+
+import itertools
+
+from . import ncsa
+
+REPOS = {
+    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
+        ncsa.repos(),
+    )
+}

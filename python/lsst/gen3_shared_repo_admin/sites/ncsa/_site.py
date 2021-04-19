@@ -19,7 +19,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ._site_definition import SiteDefinition
-from ._repo_definition import RepoDefinition
-from ._tool import RepoAdminTool
-from . import sites
+from __future__ import annotations
+
+__all__ = ("NCSA",)
+
+from ..._site_definition import SiteDefinition
+
+NCSA = SiteDefinition(
+    name="NCSA",
+    repo_uri_template="/repo/{repo.name}_{repo.date}",
+    db_namespace_template="{repo.name}_{repo.date}",
+    db_uri_template="postgresql://lsst-pg-prod1.ncsa.illinois.edu:5432/lsstdb1",
+)
