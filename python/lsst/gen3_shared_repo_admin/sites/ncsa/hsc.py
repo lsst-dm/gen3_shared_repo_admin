@@ -183,34 +183,37 @@ def rerun_operations() -> Iterator[AdminOperation]:
     in the `/repo/main` data repository at NCSA.
     """
     for weekly, ticket in {
+        "w_2021_14": "DM-29519",
         "w_2021_10": "DM-29074",
         "w_2021_06": "DM-28654",
         "w_2021_02": "DM-28282",
         "w_2020_50": "DM-28140",
         "w_2020_42": "DM-27244",
     }.items():
-        chain = ["HSC/raw/RC2", "HSC/calib", "HSC/masks", "skymaps", "refcats"]
-        for old_suffix, new_suffix in {"-sfm": "sfm", "": "rest"}.items():
-            yield reruns.ConvertRerun(
-                f"HSC-rerun-RC2-{weekly}-{new_suffix}",
-                instrument_name="HSC",
-                root="/datasets/hsc/repo",
-                repo_path=f"rerun/RC/{weekly}/{ticket}{old_suffix}",
-                run_name=f"HSC/runs/RC2/{weekly}/{ticket}/{new_suffix}",
-                include=("*",),
-                exclude=("*_metadata", "raw", "brightObjectMask", "ref_cat"),
+        def generate() -> Iterator[AdminOperation]:
+            chain = ["HSC/raw/RC2", "HSC/calib", "HSC/masks", "skymaps", "refcats"]
+            for old_suffix, new_suffix in {"-sfm": "sfm", "": "rest"}.items():
+                yield reruns.ConvertRerun(
+                    f"HSC-rerun-RC2-{weekly}-{new_suffix}",
+                    instrument_name="HSC",
+                    root="/datasets/hsc/repo",
+                    repo_path=f"rerun/RC/{weekly}/{ticket}{old_suffix}",
+                    run_name=f"HSC/runs/RC2/{weekly}/{ticket}/{new_suffix}",
+                    include=("*",),
+                    exclude=("*_metadata", "raw", "brightObjectMask", "ref_cat"),
+                )
+                chain.insert(0, f"HSC/runs/RC2/{weekly}/{ticket}/{new_suffix}")
+            yield common.DefineChain(
+                f"HSC-rerun-RC2-{weekly}-chain",
+                f"HSC/runs/RC2/{weekly}/{ticket}",
+                tuple(chain),
+                doc=textwrap.fill(
+                    f"HSC RC2 processing with weekly {weekly} on ticket {ticket}, "
+                    "(converted from Gen2 repo at /datasets/hsc/repo).",
+                ),
+                flatten=True,
             )
-            chain.insert(0, f"HSC/runs/RC2/{weekly}/{ticket}/{new_suffix}")
-        yield common.DefineChain(
-            f"HSC-rerun-RC2-{weekly}-chain",
-            f"HSC/runs/RC2/{weekly}/{ticket}",
-            tuple(chain),
-            doc=textwrap.fill(
-                f"HSC RC2 processing with weekly {weekly} on ticket {ticket}, "
-                "(converted from Gen2 repo at /datasets/hsc/repo).",
-            ),
-            flatten=True,
-        )
+        yield common.Group(f"HSC-rerun-RC2-{weekly}", generate())
 
 
 @common.Group.wrap("HSC-fgcmlut-RC2")
