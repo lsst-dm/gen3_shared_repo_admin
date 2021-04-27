@@ -74,6 +74,7 @@ def operations() -> Iterator[AdminOperation]:
     yield visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
     yield from umbrella_operations()
     yield from dp0_rerun_operations()
+    yield from med1_rerun_operations()
     yield check.CheckURIs(
         "check-URIs",
         # visits are arbitrary, but cover all bands and all overlap this
@@ -313,3 +314,38 @@ def dp0_rerun_operations() -> Iterator[AdminOperation]:
         ),
         flatten=True,
     )
+
+
+@common.Group.wrap("2.2i-rerun-med1")
+def med1_rerun_operations() -> Iterator[AdminOperation]:
+    """Generate all operations used to convert (to Gen3) recent DM reprocessing
+    of the test-med-1 subset.
+    """
+    for weekly, ticket in {
+        "w_2021_12": "DM-29427",
+        "w_2021_04": "DM-28453",
+    }.items():
+        def generate() -> Iterator[AdminOperation]:
+            chain = ["2.2i/defaults/test-med-1"]
+            for suffix in ("sfm", "coadd", "multi"):
+                yield reruns.ConvertRerun(
+                    f"2.2i-rerun-RC2-{weekly}-{suffix}",
+                    instrument_name="LSSTCam-imSim",
+                    root="/datasets/DC2/repoRun2.2i",
+                    repo_path=f"rerun/{weekly}/{ticket}/{suffix}",
+                    run_name=f"2.2i/runs/test-med-1/{weekly}/{ticket}/{suffix}",
+                    include=("*",),
+                    exclude=("*_metadata", "raw", "ref_cat"),
+                )
+                chain.insert(0, f"2.2i/runs/test-med-1/{weekly}/{ticket}/{suffix}")
+            yield common.DefineChain(
+                f"2.2i-rerun-med1-{weekly}-chain",
+                f"2.2i/runs/test-med-1/{weekly}/{ticket}",
+                tuple(chain),
+                doc=textwrap.fill(
+                    f"DM reprocessing of the test-med-1 dataset with weekly {weekly} on ticket {ticket}, "
+                    "(converted from Gen2 repo at /datasets/DC2/repoRun2.2i).",
+                ),
+                flatten=True,
+            )
+        yield common.Group(f"2.2i-rerun-med1-{weekly}", generate())
