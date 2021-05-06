@@ -40,6 +40,7 @@ from ... import doc_templates
 from ... import refcats
 from ._site import NCSA
 from . import hsc
+from . import decam
 
 if TYPE_CHECKING:
     from ._operation import AdminOperation
@@ -72,6 +73,7 @@ def operations() -> Iterator[AdminOperation]:
     yield from rubin_operations("LSSTCam", "lsst.obs.lsst.LsstCam")
     yield from rubin_operations("LSST-TS8", "lsst.obs.lsst.LsstTS8")
     yield from rubin_operations("LSST-TS3", "lsst.obs.lsst.LsstTS3")
+    yield from decam.operations()
 
 
 def rubin_operations(name: str, class_name: str) -> Iterator[AdminOperation]:
