@@ -116,10 +116,12 @@ class DECamRawIngest(AdminOperation):
         task = self.make_task(tool, on_success=checker)
         with SimpleStatus.run_context(self, tool):
             if not tool.dry_run:
-                task.run(self._paths, processes=tool.jobs, run=self.collection)
-                if self.tag is not None:
-                    tool.butler.registry.registerCollection(self.tag)
-                    tool.butler.registry.associate(self.tag, checker.refs)
+                try:
+                    task.run(self._paths, processes=tool.jobs, run=self.collection)
+                finally:
+                    if self.tag is not None:
+                        tool.butler.registry.registerCollection(self.tag)
+                        tool.butler.registry.associate(self.tag, checker.refs)
 
     @property
     def TaskClass(self) -> Type[RawIngestTask]:
