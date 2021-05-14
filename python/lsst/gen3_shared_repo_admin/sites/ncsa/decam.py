@@ -97,6 +97,27 @@ def raw_operations() -> Iterator[AdminOperation]:
         "DECam",
         transfer="copy",
     )
+    yield DECamRawIngest(
+        # These directories contain some raw calibrations as well as science
+        # frames, which we don't want in the tagged collection.  This was
+        # manually patched after ingest via some Registry.disassociate calls.
+        "DECam-raw-saha_bulge",
+        [
+            root.joinpath("saha_bulge", str(d))
+            for d in (
+                20130510, 20130511, 20130512, 20130607, 20130608, 20130609,
+                20130610, 20130622, 20130624, 20130804, 20130805, 20130806,
+                20150402, 20150403, 20150404,
+            )
+        ],
+        "DECam",
+        tag="DECam/raw/saha_bulge",
+    )
+    yield DECamRawIngest(
+        "DECam-raw-saha_bulge-calibs",
+        [Path("/datasets/decam/_internal/calib/saha_bulge")],
+        "DECam",
+    )
 
 
 @common.Group.wrap("DECam-umbrella")
@@ -105,23 +126,30 @@ def umbrella_operations() -> Iterator[AdminOperation]:
     for DECam in the `/repo/main` data repository at NCSA.
     """
     yield common.DefineChain(
-        "DECam-defaults-all",
+        "DECam-umbrella-all",
         "DECam/defaults", (
             "DECam/raw/all", "DECam/calib", "refcats", "skymaps",
         ),
         doc=doc_templates.UMBRELLA.format(tail="all available DECam data.")
     )
     yield common.DefineChain(
-        "DECam-defaults-hits2014",
+        "DECam-umbrella-hits2014",
         "DECam/defaults/hits2014", (
             "DECam/raw/hits2014", "DECam/calib", "refcats", "skymaps",
         ),
         doc=doc_templates.UMBRELLA.format(tail="fields 4, 9, and 10 of the HiTS 2014 dataset.")
     )
     yield common.DefineChain(
-        "DECam-defaults-hits2015",
+        "DECam-umbrella-hits2015",
         "DECam/defaults/hits2015", (
             "DECam/raw/hits2015", "DECam/calib", "refcats", "skymaps",
         ),
         doc=doc_templates.UMBRELLA.format(tail="fields 26, 40, and 42 of the HiTS 2015 dataset.")
+    )
+    yield common.DefineChain(
+        "DECam-umbrella-saha_bulge",
+        "DECam/defaults/saha_bulge", (
+            "DECam/raw/saha_bulge", "DECam/calib", "refcats", "skymaps",
+        ),
+        doc=doc_templates.UMBRELLA.format(tail="DECam galactic bulge dataset (PI Saha).")
     )
