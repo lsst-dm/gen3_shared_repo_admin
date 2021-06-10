@@ -155,6 +155,12 @@ def calib_operations() -> Iterator[AdminOperation]:
         labels=("PREOPS-301",),
         collection_prefix="2.2i",
     )
+    yield calibs.WriteCuratedCalibrations(
+        "2.2i-calibs-curated+bf",
+        "LSSTCam-imSim",
+        labels=("DM-30694",),
+        collection_prefix="2.2i",
+    )
     yield calibs.ConvertCalibrations(
         name="2.2i-calibs-convert",
         instrument_name="LSSTCam-imSim",
@@ -184,9 +190,9 @@ def calib_operations() -> Iterator[AdminOperation]:
     yield common.DefineChain(
         "2.2i-calibs-default",
         "2.2i/calib", (
-            "2.2i/calib/PREOPS-301",
+            "2.2i/calib/DM-30694",
             "2.2i/calib/gen2",
-            "2.2i/calib/PREOPS-301/unbounded",
+            "2.2i/calib/DM-30694/unbounded",
         ),
         doc=doc_templates.DEFAULT_CALIBS.format(instrument="Run2.2i"),
     )
