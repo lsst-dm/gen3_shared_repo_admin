@@ -38,6 +38,7 @@ from ... import calibs
 from ... import common
 from ... import doc_templates
 from ... import refcats
+from ... import visits
 from ._site import NCSA
 from . import hsc
 from . import decam
@@ -74,6 +75,8 @@ def operations() -> Iterator[AdminOperation]:
     yield from rubin_operations("LSST-TS8", "lsst.obs.lsst.LsstTS8")
     yield from rubin_operations("LSST-TS3", "lsst.obs.lsst.LsstTS3")
     yield from decam.operations()
+    yield visits.PatchExistingVisits("LATISS-visits-patch", "LATISS", visit_system="one-to-one")
+    yield visits.DefineVisits("LATISS-visits", "LATISS", visit_system="one-to-one")
 
 
 def rubin_operations(name: str, class_name: str) -> Iterator[AdminOperation]:
