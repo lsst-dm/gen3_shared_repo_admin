@@ -26,6 +26,7 @@ __all__ = (
     "ExposureFinder",
     "ingest_raws",
     "IngestLogicError",
+    "PatchExistingExposures",
     "RawIngest",
     "RawIngestGroup",
     "UnstructuredExposureFinder",
@@ -61,7 +62,7 @@ from .common import Group
 
 if TYPE_CHECKING:
     from lsst.daf.butler import DatasetRef, FileDataset, Progress
-    from lsst.obs.base import RawIngestTask
+    from lsst.obs.base import Instrument, RawIngestTask
     from ._tool import RepoAdminTool
 
 
@@ -867,3 +868,127 @@ class UnstructuredExposureFinder(ExposureFinder):
                     raise RuntimeError(f"Found multiple directory paths ({previous_path}, {path.parent}) "
                                        f"for exposure {exposure_id}.")
         return result
+
+
+class PatchExistingExposures(AdminOperation):
+    """A concrete `AdminOperation` that patches already-ingested exposures via
+    `lsst.obs.base.RawIngestTask`.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    instrument_name : `str`
+        Short/dimension name for the instrument whose raws are being ingested.
+    task_class_name : `str`, optional
+        Fully-qualified name of a `RawIngestTask` subclass to use; defaults
+        to `RawIngestTask` itself.
+    collection : `str`, optional
+        Name of the `~lsst.daf.butler.CollectionType.RUN` collection to search
+        for existing raws.
+    **kwargs
+        Additional keyword arguments forwarded to `Registry.queryDatasets`,
+        such as a ``where`` expression.
+    """
+    def __init__(
+        self,
+        name: str,
+        instrument_name: str,
+        task_class_name: str = "lsst.obs.base.RawIngestTask",
+        collection: Optional[str] = None,
+        **kwargs: Any,
+    ):
+        super().__init__(name)
+        self._instrument_name = instrument_name
+        self.task_class_name = task_class_name
+        self.collection = collection
+        self.kwargs = kwargs
+
+    def print_status(self, tool: RepoAdminTool, indent: int) -> None:
+        # Docstring inherited.
+        todo = self.query(tool)
+        if todo:
+            print(f"{' '*indent}{self.name}: {len(todo)} raws found")
+        else:
+            print(f"{' '*indent}{self.name}: nothing to do")
+
+    def run(self, tool: RepoAdminTool) -> None:
+        # Docstring inherited.
+        logging.getLogger("daf.butler.Registry.insertDatasets").setLevel(logging.WARNING)
+        logging.getLogger("daf.butler.datastores.FileDatastore.ingest").setLevel(logging.WARNING)
+        refs = self.query(tool)
+        task = self.make_task(tool)
+        uris = [tool.butler.datastore.getURI(ref) for ref in tool.progress.wrap(refs, desc="Fetching URIs")]
+        for uri in tool.progress.wrap(uris, desc="Patching exposures"):
+            try:
+                if tool.dry_run:
+                    # Need a for loop to invoke returned lazy iterator.
+                    for _ in task.prep([uri], processes=tool.jobs):
+                        pass
+                else:
+                    task.run(
+                        [uri],
+                        processes=tool.jobs,
+                        run=self.collection,
+                        skip_existing_exposures=True,
+                        update_exposure_records=True,
+                    )
+            except IngestLogicError:
+                raise
+            except Exception:
+                continue
+
+    def instrument(self, tool: RepoAdminTool) -> Instrument:
+        """Return the `Instrument` instance associated with this operation.
+        """
+        from lsst.obs.base import Instrument
+        return Instrument.fromName(self._instrument_name, tool.butler.registry)
+
+    @property
+    def TaskClass(self) -> Type[RawIngestTask]:
+        """Task class (`RawIngestTask` subclass) to run.
+        """
+        return doImport(self.task_class_name)
+
+    def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
+        """Construct the `RawIngestTask` instance to use in `run`.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        **kwargs
+            Additional keyword arguments to forward to the task constructor.
+        """
+        config = self.TaskClass.ConfigClass()
+        config.transfer = None  # should not matter, because we're just updating records
+        config.failFast = True  # we do our own, per-exposure continue
+        return self.TaskClass(config=config, butler=tool.butler, **kwargs)
+
+    def query(self, tool: RepoAdminTool) -> List[DatasetRef]:
+        """Query for an arbitrary raw dataset from each exposure to be patched.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+
+        Returns
+        -------
+        refs : `list` [ `DatasetRef` ]
+            Set of raw `DatasetRef` objects.
+        """
+        if self.collection is None:
+            collections = [self.instrument(tool).makeDefaultRawIngestRunName()]
+        else:
+            collections = [self.collection]
+        refs = {}
+        for ref in tool.butler.registry.queryDatasets(
+            "raw",
+            instrument=self._instrument_name,
+            collections=collections,
+            **self.kwargs
+        ):
+            refs[ref.dataId["exposure"]] = ref
+        return list(refs.values())
