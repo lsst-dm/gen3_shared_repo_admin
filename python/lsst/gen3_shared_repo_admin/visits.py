@@ -20,8 +20,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+from abc import abstractmethod
 
-__all__ = ("DefineVisits",)
+__all__ = ("DefineVisits", "PatchExistingVisits")
 
 from typing import Optional, Set, Tuple, Type, TYPE_CHECKING
 
@@ -35,9 +36,8 @@ if TYPE_CHECKING:
     from ._tool import RepoAdminTool
 
 
-class DefineVisits(AdminOperation):
-    """A concrete `AdminOperation` that define visits as groups of exposures
-    and computes their spatial regions, via `DefineVisitsTask`.
+class BaseVisitsOperation(AdminOperation):
+    """An intermediate base `AdminOperation` that runs `DefineVisitsTask`.
 
     Parameters
     ----------
@@ -52,22 +52,21 @@ class DefineVisits(AdminOperation):
         as a string instead of a type or instance to defer imports (which can
         be very slow) until they are actually needed, rather than include them
         in `RepoDefinition` object instantiations.
-    collections : `tuple` [ `str` ], optional
-        Collection search path for datasets needed to define visits (depends
-        on task configuration, but this should usually include a camera, raws,
-        or both).
+    visit_system : `str`, optional
+        Name of the visit system (and ``groupExposures`` subtask registration)
+        that groups exposures.
     """
     def __init__(
         self,
         name: str,
         instrument_name: str,
         task_class_name: str = "lsst.obs.base.DefineVisitsTask",
-        collections: Optional[Tuple[str, ...]] = None,
+        visit_system: Optional[str] = None,
     ):
         super().__init__(name)
         self.instrument_name = instrument_name
         self.task_class_name = task_class_name
-        self._collections = collections
+        self.visit_system = visit_system
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
@@ -89,9 +88,7 @@ class DefineVisits(AdminOperation):
         instrument = self.instrument(tool)
         task = self.make_task(tool, instrument=instrument)
         todo, _ = self.query(tool, instrument=instrument, task=task)
-        collections = self.collections(tool, instrument=instrument)
-        if not tool.dry_run:
-            task.run(todo, collections=collections, processes=tool.jobs)
+        self.run_task(tool, todo, instrument=instrument, task=task)
 
     def instrument(self, tool: RepoAdminTool) -> Instrument:
         """Return the `Instrument` instance associated with this operation.
@@ -120,7 +117,92 @@ class DefineVisits(AdminOperation):
             instrument = self.instrument(tool)
         config = self.TaskClass.ConfigClass()
         self.instrument(tool).applyConfigOverrides(self.TaskClass._DefaultName, config)
+        if self.visit_system is not None:
+            config.groupExposures.name = self.visit_system
         return self.TaskClass(config=config, butler=tool.butler)
+
+    @abstractmethod
+    def run_task(self, tool: RepoAdminTool, todo: Set[DataCoordinate],
+                 instrument: Optional[Instrument] = None,
+                 task: Optional[DefineVisitsTask] = None) -> None:
+        """Actually run `DefineVisitsTask.run`.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        todo : `set` [ `DataCoordinate` ]
+            Exposure data IDs to process.
+        instrument : `Instrument`, optional
+            The `Instrument` instance associated with this operation; obtained
+            from the `instrument` method if not provided.
+        task : `DefineVisitsTask`, optional
+            The `DefineVisitsTask` instance associated with this operation;
+            obtained from the `make_task` method if not provided.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def query(self, tool: RepoAdminTool, *, instrument: Optional[Instrument] = None,
+              task: Optional[DefineVisitsTask] = None) -> Tuple[Set[DataCoordinate], int]:
+        """Query for exposures that still need to be processed.
+
+        Parameters
+        ----------
+        tool : `RepoAdminTool`
+            Object managing shared state for all operations.
+        instrument : `Instrument`, optional
+            The `Instrument` instance associated with this operation; obtained
+            from the `instrument` method if not provided.
+        task : `DefineVisitsTask`, optional
+            The `DefineVisitsTask` instance associated with this operation;
+            obtained from the `make_task` method if not provided.
+
+        Returns
+        -------
+        todo : `set` [ `DataCoordinate` ]
+            Exposure data IDs that still need to be grouped into visits.
+        n_done : `int`
+            Number of visits already defined.
+        """
+        raise NotImplementedError()
+
+
+class DefineVisits(BaseVisitsOperation):
+    """A concrete `AdminOperation` that define visits as groups of exposures
+    and computes their spatial regions, via `DefineVisitsTask`.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    instrument_name : `str`
+        Short (dimension) name of the instrument.
+    task_class_name : `str`, optional
+        Fully-qualified path to the `DefineVisitsTask` subclass to use
+        (defaults to "lsst.obs.base.DefineVisitsTask" itself).  This is passed
+        as a string instead of a type or instance to defer imports (which can
+        be very slow) until they are actually needed, rather than include them
+        in `RepoDefinition` object instantiations.
+    visit_system : `str`, optional
+        Name of the visit system (and ``groupExposures`` subtask registration)
+        that groups exposures.
+    collections : `tuple` [ `str` ], optional
+        Collection search path for datasets needed to define visits (depends
+        on task configuration, but this should usually include a camera, raws,
+        or both).
+    """
+    def __init__(
+        self,
+        name: str,
+        instrument_name: str,
+        task_class_name: str = "lsst.obs.base.DefineVisitsTask",
+        visit_system: Optional[str] = None,
+        collections: Optional[Tuple[str, ...]] = None,
+    ):
+        super().__init__(name, instrument_name, task_class_name, visit_system=visit_system)
+        self._collections = collections
 
     def collections(self, tool: RepoAdminTool, *, instrument: Optional[Instrument] = None,
                     ) -> Tuple[str, ...]:
@@ -154,28 +236,17 @@ class DefineVisits(AdminOperation):
             raise OperationNotReadyError(f"Collections {set(result) - found} do not yet exist.")
         return result
 
+    def run_task(self, tool: RepoAdminTool, todo: Set[DataCoordinate],
+                 instrument: Optional[Instrument] = None,
+                 task: Optional[DefineVisitsTask] = None) -> None:
+        # Docstring inherited.
+        collections = self.collections(tool, instrument=instrument)
+        if not tool.dry_run:
+            task.run(todo, collections=collections, processes=tool.jobs)
+
     def query(self, tool: RepoAdminTool, *, instrument: Optional[Instrument] = None,
               task: Optional[DefineVisitsTask] = None) -> Tuple[Set[DataCoordinate], int]:
-        """Query for exposures that still need to be processed.
-
-        Parameters
-        ----------
-        tool : `RepoAdminTool`
-            Object managing shared state for all operations.
-        instrument : `Instrument`, optional
-            The `Instrument` instance associated with this operation; obtained
-            from the `instrument` method if not provided.
-        task : `DefineVisitsTask`, optional
-            The `DefineVisitsTask` instance associated with this operation;
-            obtained from the `make_task` method if not provided.
-
-        Returns
-        -------
-        todo : `set` [ `DataCoordinate` ]
-            Exposure data IDs that still need to be grouped into visits.
-        n_done : `int`
-            Number of visits already defined.
-        """
+        # Docstring inherited.
         if instrument is None:
             instrument = self.instrument(tool)
         if task is None:
@@ -207,3 +278,57 @@ class DefineVisits(AdminOperation):
             if data_id["exposure"] not in done
         }
         return exposures, len(done)
+
+
+class PatchExistingVisits(BaseVisitsOperation):
+    """A concrete `AdminOperation` that runs `DefineVisitsTask` again on
+    existing visits to update them.
+
+    Parameters
+    ----------
+    name : `str`
+        Name of the operation.  Should include any parent-operation prefixes
+        (see `AdminOperation` documentation).
+    instrument_name : `str`
+        Short (dimension) name of the instrument.
+    task_class_name : `str`, optional
+        Fully-qualified path to the `DefineVisitsTask` subclass to use
+        (defaults to "lsst.obs.base.DefineVisitsTask" itself).  This is passed
+        as a string instead of a type or instance to defer imports (which can
+        be very slow) until they are actually needed, rather than include them
+        in `RepoDefinition` object instantiations.
+    visit_system : `str`, optional
+        Name of the visit system (and ``groupExposures`` subtask registration)
+        that groups exposures.
+    """
+
+    def run_task(self, tool: RepoAdminTool, todo: Set[DataCoordinate],
+                 instrument: Optional[Instrument] = None,
+                 task: Optional[DefineVisitsTask] = None) -> None:
+        # Docstring inherited.
+        if not tool.dry_run:
+            task.run(todo, processes=tool.jobs, update_records=True)
+
+    def query(self, tool: RepoAdminTool, *, instrument: Optional[Instrument] = None,
+              task: Optional[DefineVisitsTask] = None) -> Tuple[Set[DataCoordinate], int]:
+        # Docstring inherited.
+        if instrument is None:
+            instrument = self.instrument(tool)
+        if task is None:
+            task = self.make_task(tool, instrument=instrument)
+        # A set of exposure IDs we've already made visits for, and hence want
+        # to patch.
+        graph = tool.butler.registry.dimensions["exposure"].graph
+        todo = {
+            data_id.subset(graph)
+            for data_id in tool.progress.wrap(
+                tool.butler.registry.queryDataIds(
+                    ["exposure", "visit"],
+                    instrument=self.instrument_name,
+                    where="visit_system=VS",
+                    bind=dict(VS=task.groupExposures.getVisitSystem()[0]),
+                ).expanded(),
+                desc="Querying for existing visit definitions",
+            )
+        }
+        return todo, 0
