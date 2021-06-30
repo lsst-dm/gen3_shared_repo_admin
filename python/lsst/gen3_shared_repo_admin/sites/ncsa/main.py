@@ -36,6 +36,7 @@ from typing import Iterator, TYPE_CHECKING
 from ..._repo_definition import RepoDefinition
 from ... import calibs
 from ... import common
+from ... import ingest
 from ... import doc_templates
 from ... import refcats
 from ... import visits
@@ -75,6 +76,11 @@ def operations() -> Iterator[AdminOperation]:
     yield from rubin_operations("LSST-TS8", "lsst.obs.lsst.LsstTS8")
     yield from rubin_operations("LSST-TS3", "lsst.obs.lsst.LsstTS3")
     yield from decam.operations()
+    yield ingest.PatchExistingExposures(
+        "LATISS-ingest-patch",
+        "LATISS",
+        where="exposure.observation_reason='science' AND exposure.sky_angle = NULL",
+    )
     yield visits.PatchExistingVisits("LATISS-visits-patch", "LATISS", visit_system="one-to-one")
     yield visits.DefineVisits("LATISS-visits", "LATISS", visit_system="one-to-one")
 
