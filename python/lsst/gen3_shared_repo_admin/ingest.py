@@ -124,8 +124,9 @@ def ingest_raws(
     types, the order in which the operations are run will determine which
     files/rules are actually used.
     """
-    ingest_op = RawIngest(name, finder, instrument_name=instrument_name, collection=collection,
-                          transfer=transfer)
+    ingest_op = RawIngest(
+        name, finder, instrument_name=instrument_name, collection=collection, transfer=transfer
+    )
     if split_into is not None:
         ingest_op = ingest_op.split_into(split_into)
     if save_found:
@@ -213,8 +214,12 @@ class ExposureFinder(ABC):
         raise NotImplementedError()
 
     @staticmethod
-    def recursive_regex(tool: RepoAdminTool, top: Path, file_regex: str, follow_symlinks: bool = False,
-                        ) -> Iterator[Tuple[Path, Match]]:
+    def recursive_regex(
+        tool: RepoAdminTool,
+        top: Path,
+        file_regex: str,
+        follow_symlinks: bool = False,
+    ) -> Iterator[Tuple[Path, Match]]:
         """Recursively scan a directory for files whose names (not full paths)
         match a regular expression.
 
@@ -261,8 +266,12 @@ class ExposureFinder(ABC):
         yield from recurse_into(top, tool.progress.at(logging.DEBUG))
 
     @staticmethod
-    def recursive_glob(tool: RepoAdminTool, top: Path, file_pattern: str, follow_symlinks: bool = False,
-                       ) -> Iterator[Path]:
+    def recursive_glob(
+        tool: RepoAdminTool,
+        top: Path,
+        file_pattern: str,
+        follow_symlinks: bool = False,
+    ) -> Iterator[Path]:
         """Recursively scan a directory for files whose names (not full paths)
         match a shell glob.
 
@@ -411,9 +420,9 @@ class _ApportionFoundExposuresAdapter(ExposureFinder):
         found = self._adapted.find(tool)
         total = len(found)
         size = math.ceil(total / self._count)
-        start = min(self._index*size, total)
+        start = min(self._index * size, total)
         stop = min(start + size, total)
-        return {exposure_id: found[exposure_id] for exposure_id in sorted(found.keys())[start: stop]}
+        return {exposure_id: found[exposure_id] for exposure_id in sorted(found.keys())[start:stop]}
 
     def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
         # Docstring inherited.
@@ -428,6 +437,7 @@ class IngestLogicError(Exception):
     committed to the database, and hence it requires manual intervention if a
     fix is necessary.
     """
+
     pass
 
 
@@ -444,13 +454,17 @@ class _CheckRawIngestSuccess:
             for ref in fd.refs:
                 ingested_exposure_ids.update(ref.dataId["exposure"] for ref in fd.refs)
         if ingested_paths != self.paths:
-            raise IngestLogicError(f"Mismatch between ingested path(s) {ingested_paths - self.paths} "
-                                   f"and expected paths {self.paths - ingested_paths} for "
-                                   f"{self.exposure_id}.")
+            raise IngestLogicError(
+                f"Mismatch between ingested path(s) {ingested_paths - self.paths} "
+                f"and expected paths {self.paths - ingested_paths} for "
+                f"{self.exposure_id}."
+            )
         if ingested_exposure_ids != {self.exposure_id}:
             bad = ingested_exposure_ids - {self.exposure_id}
-            raise IngestLogicError(f"File(s) thought to be for exposure={self.exposure_id} "
-                                   f"actually ingested as {bad}: {ingested_paths}.")
+            raise IngestLogicError(
+                f"File(s) thought to be for exposure={self.exposure_id} "
+                f"actually ingested as {bad}: {ingested_paths}."
+            )
 
     paths: Set[Path]
     exposure_id: int
@@ -565,7 +579,7 @@ class RawIngest(AdminOperation):
                     self.collection,
                 )
                 for i in range(n)
-            )
+            ),
         )
 
     def save_found(self, suffix: str = "find") -> RawIngest:
@@ -647,8 +661,7 @@ class RawIngest(AdminOperation):
 
     @property
     def TaskClass(self) -> Type[RawIngestTask]:
-        """Task class (`RawIngestTask` subclass) to run.
-        """
+        """Task class (`RawIngestTask` subclass) to run."""
         return doImport(self.task_class_name)
 
     def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
@@ -707,8 +720,15 @@ class DefineRawTag(AdminOperation):
         Documentation string for the new collection.
     """
 
-    def __init__(self, name: str, finder: ExposureFinder, instrument_name: str,
-                 input_collection: Optional[str], output_collection: str, doc: str):
+    def __init__(
+        self,
+        name: str,
+        finder: ExposureFinder,
+        instrument_name: str,
+        input_collection: Optional[str],
+        output_collection: str,
+        doc: str,
+    ):
         super().__init__(name)
         self.finder = finder
         self._instrument_name = instrument_name
@@ -738,6 +758,7 @@ class DefineRawTag(AdminOperation):
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
         from lsst.daf.butler.registry import MissingCollectionError
+
         try:
             tool.butler.registry.getCollectionType(self.input_collection)
         except MissingCollectionError:
@@ -753,6 +774,7 @@ class DefineRawTag(AdminOperation):
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
         from lsst.daf.butler import CollectionType
+
         refs = self.query(tool)
         if not tool.dry_run:
             tool.butler.registry.registerCollection(self.output_collection, CollectionType.TAGGED)
@@ -776,6 +798,7 @@ class DefineRawTag(AdminOperation):
         refs = set()
         if self.input_collection is None:
             from lsst.obs.base import Instrument
+
             instrument = Instrument.fromName(self._instrument_name, tool.butler.registry)
             input_collection = instrument.makeDefaultRawIngestRunName()
         else:
@@ -784,10 +807,11 @@ class DefineRawTag(AdminOperation):
             for n in range(0, len(found), self.QUERY_N_EXPOSURES):
                 start = n
                 stop = min(n + self.QUERY_N_EXPOSURES, len(found))
-                where = "exposure IN (" + ", ".join(str(id) for id in found[start: stop]) + ")"
+                where = "exposure IN (" + ", ".join(str(id) for id in found[start:stop]) + ")"
                 refs.update(
                     tool.butler.registry.queryDatasets(
-                        "raw", collections=[input_collection],
+                        "raw",
+                        collections=[input_collection],
                         instrument=self._instrument_name,
                         where=where,
                     )
@@ -827,9 +851,14 @@ class UnstructuredExposureFinder(ExposureFinder):
     also need to reimplement the new `extract_exposure_id` method.
     """
 
-    def __init__(self, root: Path, file_regex: str, *,
-                 resolve_duplicates: Optional[Callable[[Path, Path], Optional[Path]]] = None,
-                 follow_symlinks: bool = False):
+    def __init__(
+        self,
+        root: Path,
+        file_regex: str,
+        *,
+        resolve_duplicates: Optional[Callable[[Path, Path], Optional[Path]]] = None,
+        follow_symlinks: bool = False,
+    ):
         self._root = root
         self._file_regex = file_regex
         self._resolve_duplicates = resolve_duplicates if resolve_duplicates is not None else lambda a, b: None
@@ -857,16 +886,19 @@ class UnstructuredExposureFinder(ExposureFinder):
     def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
         # Docstring inherited.
         result = {}
-        for path, match in self.recursive_regex(tool, self._root, self._file_regex,
-                                                follow_symlinks=self._follow_symlinks):
+        for path, match in self.recursive_regex(
+            tool, self._root, self._file_regex, follow_symlinks=self._follow_symlinks
+        ):
             exposure_id = self.extract_exposure_id(tool, match)
             previous_path = result.setdefault(exposure_id, path.parent)
             if previous_path != path.parent:
                 if (best_path := self._resolve_duplicates(previous_path, path.parent)) is not None:
                     result[exposure_id] = best_path
                 else:
-                    raise RuntimeError(f"Found multiple directory paths ({previous_path}, {path.parent}) "
-                                       f"for exposure {exposure_id}.")
+                    raise RuntimeError(
+                        f"Found multiple directory paths ({previous_path}, {path.parent}) "
+                        f"for exposure {exposure_id}."
+                    )
         return result
 
 
@@ -891,6 +923,7 @@ class PatchExistingExposures(AdminOperation):
         Additional keyword arguments forwarded to `Registry.queryDatasets`,
         such as a ``where`` expression.
     """
+
     def __init__(
         self,
         name: str,
@@ -940,15 +973,14 @@ class PatchExistingExposures(AdminOperation):
                 continue
 
     def instrument(self, tool: RepoAdminTool) -> Instrument:
-        """Return the `Instrument` instance associated with this operation.
-        """
+        """Return the `Instrument` instance associated with this operation."""
         from lsst.obs.base import Instrument
+
         return Instrument.fromName(self._instrument_name, tool.butler.registry)
 
     @property
     def TaskClass(self) -> Type[RawIngestTask]:
-        """Task class (`RawIngestTask` subclass) to run.
-        """
+        """Task class (`RawIngestTask` subclass) to run."""
         return doImport(self.task_class_name)
 
     def make_task(self, tool: RepoAdminTool, **kwargs: Any) -> RawIngestTask:
@@ -985,10 +1017,7 @@ class PatchExistingExposures(AdminOperation):
             collections = [self.collection]
         refs = {}
         for ref in tool.butler.registry.queryDatasets(
-            "raw",
-            instrument=self._instrument_name,
-            collections=collections,
-            **self.kwargs
+            "raw", instrument=self._instrument_name, collections=collections, **self.kwargs
         ):
             refs[ref.dataId["exposure"]] = ref
         return list(refs.values())
