@@ -72,6 +72,7 @@ def operations() -> Iterator[AdminOperation]:
     )
     yield from calib_operations()
     yield visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
+    yield visits.PatchExistingVisits("2.2i-visits-patch", "LSSTCam-imSim")
     yield from umbrella_operations()
     yield from dp0_rerun_operations()
     yield from med1_rerun_operations()
