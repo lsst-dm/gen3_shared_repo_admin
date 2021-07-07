@@ -127,7 +127,7 @@ def raw_operations() -> Iterator[AdminOperation]:
     # also aren't nicely organized into per-exposure directories, so we have to
     # use a different ExposureFinder.
     yield from ingest_raws(
-        "2.2i.raw-calibs-others",
+        "2.2i-raw-calibs-others",
         UnstructuredImSimExposureFinder(
             Path("/project/czw/dataDirs/DC2_raw_calibs/calibration_data"),
             has_band_suffix=False,
@@ -135,12 +135,32 @@ def raw_operations() -> Iterator[AdminOperation]:
         transfer="copy",
     )
     yield from ingest_raws(
-        "2.2i.raw-calibs-bf-flats",
+        "2.2i-raw-calibs-bf-flats",
         UnstructuredImSimExposureFinder(
             Path("/project/czw/dataDirs/DC2_raw_calibs/bf_flats_20190408"),
             has_band_suffix=True,
         ),
         transfer="copy",
+    )
+    # Raws missing from the original DP0 transfer for unknown reasons, plus all
+    # of those in Run2.2i that we hadn't intended to transfer, moved to NCSA
+    # from NERSC by Jim Chiang.  This also includes missing raws from the
+    # test-med-1 subset, which were present at NCSA before but were not
+    # ingested as part of the 2.2i-raw-monthly operation because at least one
+    # detector from each exposure was part of the initial DP0 transfer, and
+    # that was enough for our deduplication to block the missing ones from
+    # ingesting earlier.  We ingest those from the path below rather than the
+    # the other /datasets/DC2/raw/Run2.2i to limit the number of raw URI
+    # roots/patterns we have in the database.
+    yield from ingest_raws(
+        "2.2i-raw-missing",
+        UnstructuredImSimExposureFinder(
+            Path("/datasets/DC2/raw/Run2.2i/dp0-missing"),
+            has_band_suffix=True,
+            allow_incomplete=True,
+        ),
+        save_found=True,
+        extend_ingested_exposures=True,
     )
 
 
