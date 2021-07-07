@@ -152,7 +152,10 @@ class UnstructuredImSimExposureFinder(ingest.UnstructuredExposureFinder):
                         result.add(path)
                         break
                 else:
-                    raise FileNotFoundError(f"Missing raw with detector={detector_name} for {exposure_id}.")
+                    if not self._allow_incomplete:
+                        raise FileNotFoundError(
+                            f"Missing raw with detector={detector_name} for {exposure_id}."
+                        )
             else:
                 path = base.joinpath(f"lsst_a_{exposure_id}_{detector_name}_{band}.fits")
                 if path.exists():
