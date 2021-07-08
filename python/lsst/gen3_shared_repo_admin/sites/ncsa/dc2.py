@@ -30,7 +30,7 @@ __all__ = ()
 
 from pathlib import Path
 import textwrap
-from typing import Iterator, TYPE_CHECKING
+from typing import Dict, Iterator, TYPE_CHECKING
 
 from ..._repo_definition import RepoDefinition
 from ... import common
@@ -49,6 +49,7 @@ from ._site import NCSA
 
 if TYPE_CHECKING:
     from ._operation import AdminOperation
+    from ._tool import RepoAdminTool
 
 
 def repos() -> Iterator[RepoDefinition]:
@@ -84,6 +85,18 @@ def operations() -> Iterator[AdminOperation]:
           "skymap": "DC2", "tract": 4644, "detector": 90}
          for v in (760247, 944265, 896824, 471974, 971097, 190279)]
     )
+
+
+def filter_test_med_1(tool: RepoAdminTool, found: Dict[int, Path]) -> Dict[int, Path]:
+    """Raw exposure filter function (see `ExposureFinder.filtered_by`) that
+    selects raws from exposures for which raws from (presumably other)
+    detectors are in the ``2.2i/raw/test-med-1`` collection.
+    """
+    exposures = {
+        ref.dataId["exposure"]
+        for ref in tool.butler.registry.queryDatasets("raw", collections="2.2i/raw/test-med-1")
+    }
+    return {exposure_id: path for exposure_id, path in found.items() if exposure_id in exposures}
 
 
 @common.Group.wrap("2.2i-raw")
@@ -153,14 +166,22 @@ def raw_operations() -> Iterator[AdminOperation]:
     # ingesting earlier.  We ingest those from the path below rather than the
     # the other /datasets/DC2/raw/Run2.2i to limit the number of raw URI
     # roots/patterns we have in the database.
+    missing = UnstructuredImSimExposureFinder(
+        Path("/datasets/DC2/raw/Run2.2i/dp0-missing"),
+        has_band_suffix=True,
+        allow_incomplete=True,
+    )
+    # Define the subset of the missing subset in test-med-1 separately, because
+    # these can be ingested in several minutes rather than ~ a day.
+    yield from ingest_raws(
+        "2.2i-raw-missing-monthly",
+        missing.filtered_by(filter_test_med_1),
+        extend_ingested_exposures=True,
+    )
+    # The full missing subset, including the test-med-1 ones.
     yield from ingest_raws(
         "2.2i-raw-missing",
-        UnstructuredImSimExposureFinder(
-            Path("/datasets/DC2/raw/Run2.2i/dp0-missing"),
-            has_band_suffix=True,
-            allow_incomplete=True,
-        ),
-        save_found=True,
+        missing,
         extend_ingested_exposures=True,
     )
 
