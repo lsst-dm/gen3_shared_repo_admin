@@ -333,6 +333,26 @@ class ExposureFinder(ABC):
         """
         return _SaveFoundExposuresAdapter(name, self)
 
+    def filtered_by(
+        self, callback: Callable[[RepoAdminTool, Dict[int, Path]], Dict[int, Path]]
+    ) -> ExposureFinder:
+        """Return an adapted version of the `ExposureFinder` that filters
+        results according to a callback function.
+
+        Parameters
+        ----------
+        callback : `Callable`
+            Filter function to apply.  Takes the `RepoAdminTool` and the
+            unfiltered dictionary (mapping ``exposure_id`` to path) as
+            arguments, and returns a filtered dictionary.
+
+        Returns
+        -------
+        finder : `ExposureFinder`
+            A new `ExposureFinder` instance that applies the filter.
+        """
+        return _FilterFoundExposuresAdapter(self, callback)
+
 
 class _SaveFoundExposuresAdapter(AdminOperation, ExposureFinder):
     """Adapter class for `ExposureFinder` that saves found exposures.
@@ -399,6 +419,43 @@ class _SaveFoundExposuresAdapter(AdminOperation, ExposureFinder):
             The name of the file used to save the found exposures.
         """
         return tool.work_dir.joinpath(f"{self.name}.json")
+
+
+class _FilterFoundExposuresAdapter(ExposureFinder):
+    """Adapter class for `ExposureFinder` that filters exposures according
+    to a callback.
+
+    Parameters
+    ----------
+    name : `str`
+        Name for this `AdminOperation`.
+    adapted : `ExposureFinder`
+        `ExposureFinder` instance to delegate to.
+    func : `Callable`
+        Callable given a `RepoAdminTool` and a `dict` mapping ``exposure_id``
+        values to paths that returns a filtered version of the dictionary.
+    """
+
+    def __init__(
+        self,
+        adapted: ExposureFinder,
+        func: Callable[[RepoAdminTool, Dict[int, Path]], Dict[int, Path]],
+    ):
+        self._adapted = adapted
+        self._func = func
+
+    def flatten(self) -> Iterator[AdminOperation]:
+        # Docstring inherited.
+        yield from self._adapted.flatten()
+
+    def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        # Docstring inherited.
+        found = self._adapted.find(tool)
+        return self._func(tool, found)
+
+    def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
+        # Docstring inherited.
+        return self._adapted.expand(tool, exposure_id, found)
 
 
 class _ApportionFoundExposuresAdapter(ExposureFinder):
