@@ -665,13 +665,14 @@ class RawIngest(AdminOperation):
         found = self.finder.find(tool)
         if not found:
             return
+        checker = _CheckRawIngestSuccess()
         if not self.extend_ingested_exposures:
             ingested = self.already_ingested(tool)
             todo = found.keys() - ingested
+            task = self.make_task(tool, on_success=checker)
         else:
             todo = found
-        checker = _CheckRawIngestSuccess()
-        task = self.make_task(tool, on_success=checker)
+            task = self.make_task(tool)
         for exposure_id in tool.progress.wrap(todo, desc="Ingesting exposures"):
             paths = self.finder.expand(tool, exposure_id, found)
             checker.paths = paths
@@ -683,7 +684,12 @@ class RawIngest(AdminOperation):
                     for _ in task.prep(str_paths, processes=tool.jobs):
                         pass
                 else:
-                    task.run(str_paths, processes=tool.jobs, run=self.collection)
+                    task.run(
+                        str_paths,
+                        processes=tool.jobs,
+                        run=self.collection,
+                        skip_existing_exposures=self.extend_ingested_exposures,
+                    )
             except IngestLogicError:
                 raise
             except Exception:
