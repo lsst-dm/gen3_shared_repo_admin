@@ -111,9 +111,9 @@ class UnstructuredImSimExposureFinder(ingest.UnstructuredExposureFinder):
         self._allow_incomplete = allow_incomplete
         self._has_band_suffix = has_band_suffix
 
-    FILE_REGEX_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}_[ugrizy].fits"
+    FILE_REGEX_BAND_SUFFIX = r"lsst_a_(\d+)_R\d{2}_S\d{2}_[ugrizy].fits"
 
-    FILE_REGEX_NO_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}.fits"
+    FILE_REGEX_NO_BAND_SUFFIX = r"lsst_a_(\d+)_R\d{2}_S\d{2}.fits"
 
     DETECTOR_NAMES = set(
         f"{r}_{s}" for r, s in itertools.product(
