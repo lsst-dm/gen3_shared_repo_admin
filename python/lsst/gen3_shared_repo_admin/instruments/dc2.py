@@ -26,6 +26,7 @@ any data repository containing DESC DC2 data.
 from __future__ import annotations
 
 __all__ = (
+    "define_dr6_tags",
     "ImSimExposureFinder",
     "ingest_raws",
     "ingest_refcat",
@@ -202,3 +203,24 @@ def ingest_refcat(ticket: str, path: Path) -> Iterator[AdminOperation]:
         (f"refcats/{ticket}",),
         doc="Umbrella collection for all active reference catalogs.",
     )
+
+
+@Group.wrap("2.2i-raw-dr6-tags")
+def define_dr6_tags() -> Iterator[AdminOperation]:
+    id_sources = {
+        "wfd": "resource://lsst.gen3_shared_repo_admin/data/dc2/DR6_Run2.2i_WFD_visits.txt",
+        "ddf": "resource://lsst.gen3_shared_repo_admin/data/dc2/DR6_Run2.2i_WFD_visits.txt",
+    }
+    doc_snippets = {
+        "wfd": "standard wide/fast/deep",
+        "ddf": "deep-drilling fields",
+    }
+    for name, uri in id_sources.items():
+        yield ingest.DefineRawTag(
+            f"2.2i-raw-dr6-tags-{name}",
+            ingest.ListFileExposureIdSource(uri),
+            instrument_name="LSSTCam-imSim",
+            input_collection="2.2i/raw/all",
+            output_collection=f"2.2i/raw/DR6/{name.upper()}",
+            doc=f"Raw exposures included in (simulated) Data Release 6, in the {doc_snippets[name]} layer.",
+        )

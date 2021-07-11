@@ -40,6 +40,7 @@ from ... import doc_templates
 from ... import reruns
 from ... import visits
 from ...instruments.dc2 import (
+    define_dr6_tags,
     ImSimExposureFinder,
     ingest_raws,
     ingest_refcat,
@@ -184,6 +185,7 @@ def raw_operations() -> Iterator[AdminOperation]:
         missing,
         extend_ingested_exposures=True,
     )
+    yield from define_dr6_tags()
 
 
 @common.Group.wrap("2.2i-calibs")

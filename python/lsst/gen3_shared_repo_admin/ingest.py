@@ -24,8 +24,10 @@ from __future__ import annotations
 __all__ = (
     "DefineRawTag",
     "ExposureFinder",
+    "ExposureIdSource",
     "ingest_raws",
     "IngestLogicError",
+    "ListFileExposureIdSource",
     "PatchExistingExposures",
     "RawIngest",
     "RawIngestGroup",
@@ -44,6 +46,7 @@ import textwrap
 from typing import (
     Any,
     Callable,
+    Collection,
     Dict,
     Iterator,
     List,
@@ -53,6 +56,7 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
+    Union,
 )
 
 from lsst.utils import doImport
@@ -61,7 +65,7 @@ from ._operation import AdminOperation, OperationNotReadyError
 from .common import Group
 
 if TYPE_CHECKING:
-    from lsst.daf.butler import DatasetRef, FileDataset, Progress
+    from lsst.daf.butler import ButlerURI, DatasetRef, FileDataset, Progress
     from lsst.obs.base import Instrument, RawIngestTask
     from ._tool import RepoAdminTool
 
@@ -156,15 +160,7 @@ def ingest_raws(
         )
 
 
-class ExposureFinder(ABC):
-    """A helper interface for the `RawIngest` operation that identifies the
-    files to be ingested and groups them by exposure.
-
-    `ExposureFinder` objects are designed to be composed to add additional
-    behaviors (usually filtering).  Subclasses should also inherit from
-    `AdminOperation` (or hold nested `AdminOperation` instances) if they make
-    persistent changes to filesystems or databases.
-    """
+class ExposureIdSource(ABC):
 
     def flatten(self) -> Iterator[AdminOperation]:
         """Recursively iterate over any nested `AdminOperation` instances,
@@ -176,6 +172,35 @@ class ExposureFinder(ABC):
            `AdminOperation` instances.
         """
         yield from ()
+
+    @abstractmethod
+    def exposure_ids(self, tool: RepoAdminTool) -> Collection[int]:
+        raise NotImplementedError()
+
+
+class ListFileExposureIdSource(ExposureIdSource):
+
+    def __init__(self, list_uri: Union[str, ButlerURI, Path]):
+        self.list_uri = list_uri
+
+    def exposure_ids(self, tool: RepoAdminTool) -> Dict[int, Path]:
+        from lsst.daf.butler import ButlerURI
+        return {int(v) for v in ButlerURI(self.list_uri).read().decode().split("\n") if v.strip()}
+
+
+class ExposureFinder(ExposureIdSource):
+    """A helper interface for the `RawIngest` operation that identifies the
+    files to be ingested and groups them by exposure.
+
+    `ExposureFinder` objects are designed to be composed to add additional
+    behaviors (usually filtering).  Subclasses should also inherit from
+    `AdminOperation` (or hold nested `AdminOperation` instances) if they make
+    persistent changes to filesystems or databases.
+    """
+
+    def exposure_ids(self, tool: RepoAdminTool) -> Collection[int]:
+        # Docstring inherited.
+        return self.find(tool).keys()
 
     @abstractmethod
     def find(self, tool: RepoAdminTool) -> Dict[int, Path]:
@@ -798,21 +823,22 @@ class RawIngest(AdminOperation):
 
 class DefineRawTag(AdminOperation):
     """A concrete `AdminOperation` that defines a ``TAGGED`` collection
-    containing all raws ingested via a particular `ExposureFinder`.
+    containing all raws ingested via a particular `ExposureIdSource`.
 
     Parameters
     ----------
     name : `str`
         Name of the operation.  Should include any parent-operation prefixes
         (see `AdminOperation` documentation).
-    finder : `ExposureFinder`
+    exposure_id_source : `ExposureIdSource`
         Object responsible for finding the raw files that were ingested.
     instrument_name : `str`
         Short/dimension name for the instrument whose raws are being ingested.
     input_collection : `str` or `None`
         Name of the collection that all raws were ingested into.  All raws in
-        this collection with exposures found by ``finder`` will be tagged.
-        If `None`, the default collection for ``instrument_name`` is used.
+        this collection with exposures found by ``exposure_id_source`` will be
+        tagged.  If `None`, the default collection for ``instrument_name`` is
+        used.
     output_collection : `str`
         Name of the new ``TAGGED`` collection.
     doc : `str`
@@ -822,14 +848,14 @@ class DefineRawTag(AdminOperation):
     def __init__(
         self,
         name: str,
-        finder: ExposureFinder,
+        exposure_id_source: ExposureIdSource,
         instrument_name: str,
         input_collection: Optional[str],
         output_collection: str,
         doc: str,
     ):
         super().__init__(name)
-        self.finder = finder
+        self.exposure_id_source = exposure_id_source
         self._instrument_name = instrument_name
         self.input_collection = input_collection
         self.output_collection = output_collection
@@ -851,7 +877,7 @@ class DefineRawTag(AdminOperation):
         op : `AdminOperation`
             Self or an operation nested within it.
         """
-        yield from self.finder.flatten()
+        yield from self.exposure_id_source.flatten()
         yield self
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
@@ -893,7 +919,7 @@ class DefineRawTag(AdminOperation):
         refs : `set` [ `DatasetRef` ]
             References to the datasets to tag.
         """
-        found = list(self.finder.find(tool))
+        found = list(self.exposure_id_source.exposure_ids(tool))
         refs = set()
         if self.input_collection is None:
             from lsst.obs.base import Instrument
