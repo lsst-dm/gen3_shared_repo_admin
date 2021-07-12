@@ -26,6 +26,7 @@ any data repository containing DESC DC2 data.
 from __future__ import annotations
 
 __all__ = (
+    "define_dr6_tags",
     "ImSimExposureFinder",
     "ingest_raws",
     "ingest_refcat",
@@ -111,9 +112,9 @@ class UnstructuredImSimExposureFinder(ingest.UnstructuredExposureFinder):
         self._allow_incomplete = allow_incomplete
         self._has_band_suffix = has_band_suffix
 
-    FILE_REGEX_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}_[ugrizy].fits"
+    FILE_REGEX_BAND_SUFFIX = r"lsst_a_(\d+)_R\d{2}_S\d{2}_[ugrizy].fits"
 
-    FILE_REGEX_NO_BAND_SUFFIX = r"lsst_a_(\d{7})_R\d{2}_S\d{2}.fits"
+    FILE_REGEX_NO_BAND_SUFFIX = r"lsst_a_(\d+)_R\d{2}_S\d{2}.fits"
 
     DETECTOR_NAMES = set(
         f"{r}_{s}" for r, s in itertools.product(
@@ -152,7 +153,10 @@ class UnstructuredImSimExposureFinder(ingest.UnstructuredExposureFinder):
                         result.add(path)
                         break
                 else:
-                    raise FileNotFoundError(f"Missing raw with detector={detector_name} for {exposure_id}.")
+                    if not self._allow_incomplete:
+                        raise FileNotFoundError(
+                            f"Missing raw with detector={detector_name} for {exposure_id}."
+                        )
             else:
                 path = base.joinpath(f"lsst_a_{exposure_id}_{detector_name}_{band}.fits")
                 if path.exists():
@@ -199,3 +203,24 @@ def ingest_refcat(ticket: str, path: Path) -> Iterator[AdminOperation]:
         (f"refcats/{ticket}",),
         doc="Umbrella collection for all active reference catalogs.",
     )
+
+
+@Group.wrap("2.2i-raw-dr6-tags")
+def define_dr6_tags() -> Iterator[AdminOperation]:
+    id_sources = {
+        "wfd": "resource://lsst.gen3_shared_repo_admin/data/dc2/DR6_Run2.2i_WFD_visits.txt",
+        "ddf": "resource://lsst.gen3_shared_repo_admin/data/dc2/DR6_Run2.2i_WFD_visits.txt",
+    }
+    doc_snippets = {
+        "wfd": "standard wide/fast/deep",
+        "ddf": "deep-drilling fields",
+    }
+    for name, uri in id_sources.items():
+        yield ingest.DefineRawTag(
+            f"2.2i-raw-dr6-tags-{name}",
+            ingest.ListFileExposureIdSource(uri),
+            instrument_name="LSSTCam-imSim",
+            input_collection="2.2i/raw/all",
+            output_collection=f"2.2i/raw/DR6/{name.upper()}",
+            doc=f"Raw exposures included in (simulated) Data Release 6, in the {doc_snippets[name]} layer.",
+        )

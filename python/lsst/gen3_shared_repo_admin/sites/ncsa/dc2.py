@@ -30,7 +30,7 @@ __all__ = ()
 
 from pathlib import Path
 import textwrap
-from typing import Iterator, TYPE_CHECKING
+from typing import Dict, Iterator, TYPE_CHECKING
 
 from ..._repo_definition import RepoDefinition
 from ... import common
@@ -40,6 +40,7 @@ from ... import doc_templates
 from ... import reruns
 from ... import visits
 from ...instruments.dc2 import (
+    define_dr6_tags,
     ImSimExposureFinder,
     ingest_raws,
     ingest_refcat,
@@ -49,6 +50,7 @@ from ._site import NCSA
 
 if TYPE_CHECKING:
     from ._operation import AdminOperation
+    from ._tool import RepoAdminTool
 
 
 def repos() -> Iterator[RepoDefinition]:
@@ -72,6 +74,7 @@ def operations() -> Iterator[AdminOperation]:
     )
     yield from calib_operations()
     yield visits.DefineVisits("2.2i-visits", "LSSTCam-imSim", collections=("2.2i/raw/all",))
+    yield visits.PatchExistingVisits("2.2i-visits-patch", "LSSTCam-imSim")
     yield from umbrella_operations()
     yield from dp0_rerun_operations()
     yield from med1_rerun_operations()
@@ -83,6 +86,18 @@ def operations() -> Iterator[AdminOperation]:
           "skymap": "DC2", "tract": 4644, "detector": 90}
          for v in (760247, 944265, 896824, 471974, 971097, 190279)]
     )
+
+
+def filter_test_med_1(tool: RepoAdminTool, found: Dict[int, Path]) -> Dict[int, Path]:
+    """Raw exposure filter function (see `ExposureFinder.filtered_by`) that
+    selects raws from exposures for which raws from (presumably other)
+    detectors are in the ``2.2i/raw/test-med-1`` collection.
+    """
+    exposures = {
+        ref.dataId["exposure"]
+        for ref in tool.butler.registry.queryDatasets("raw", collections="2.2i/raw/test-med-1")
+    }
+    return {exposure_id: path for exposure_id, path in found.items() if exposure_id in exposures}
 
 
 @common.Group.wrap("2.2i-raw")
@@ -127,7 +142,7 @@ def raw_operations() -> Iterator[AdminOperation]:
     # also aren't nicely organized into per-exposure directories, so we have to
     # use a different ExposureFinder.
     yield from ingest_raws(
-        "2.2i.raw-calibs-others",
+        "2.2i-raw-calibs-others",
         UnstructuredImSimExposureFinder(
             Path("/project/czw/dataDirs/DC2_raw_calibs/calibration_data"),
             has_band_suffix=False,
@@ -135,13 +150,42 @@ def raw_operations() -> Iterator[AdminOperation]:
         transfer="copy",
     )
     yield from ingest_raws(
-        "2.2i.raw-calibs-bf-flats",
+        "2.2i-raw-calibs-bf-flats",
         UnstructuredImSimExposureFinder(
             Path("/project/czw/dataDirs/DC2_raw_calibs/bf_flats_20190408"),
             has_band_suffix=True,
         ),
         transfer="copy",
     )
+    # Raws missing from the original DP0 transfer for unknown reasons, plus all
+    # of those in Run2.2i that we hadn't intended to transfer, moved to NCSA
+    # from NERSC by Jim Chiang.  This also includes missing raws from the
+    # test-med-1 subset, which were present at NCSA before but were not
+    # ingested as part of the 2.2i-raw-monthly operation because at least one
+    # detector from each exposure was part of the initial DP0 transfer, and
+    # that was enough for our deduplication to block the missing ones from
+    # ingesting earlier.  We ingest those from the path below rather than the
+    # the other /datasets/DC2/raw/Run2.2i to limit the number of raw URI
+    # roots/patterns we have in the database.
+    missing = UnstructuredImSimExposureFinder(
+        Path("/datasets/DC2/raw/Run2.2i/dp0-missing"),
+        has_band_suffix=True,
+        allow_incomplete=True,
+    )
+    # Define the subset of the missing subset in test-med-1 separately, because
+    # these can be ingested in several minutes rather than ~ a day.
+    yield from ingest_raws(
+        "2.2i-raw-missing-monthly",
+        missing.filtered_by(filter_test_med_1),
+        extend_ingested_exposures=True,
+    )
+    # The full missing subset, including the test-med-1 ones.
+    yield from ingest_raws(
+        "2.2i-raw-missing",
+        missing,
+        extend_ingested_exposures=True,
+    )
+    yield from define_dr6_tags()
 
 
 @common.Group.wrap("2.2i-calibs")
