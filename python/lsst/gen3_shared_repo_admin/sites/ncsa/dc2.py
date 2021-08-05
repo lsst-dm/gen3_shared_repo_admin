@@ -376,7 +376,9 @@ def med1_rerun_operations() -> Iterator[AdminOperation]:
         "w_2021_20": "DM-30297",
         "w_2021_16": "DM-29770",
         "w_2021_12": "DM-29427",
+        "w_2021_08": "DM-28966",
         "w_2021_04": "DM-28453",
+        "w_2020_48": "DM-27780",
     }.items():
         def generate() -> Iterator[AdminOperation]:
             chain = ["2.2i/defaults/test-med-1"]
