@@ -38,7 +38,7 @@ from ... import common
 from ._site import NCSA
 
 if TYPE_CHECKING:
-    from ._operation import AdminOperation
+    from ..._operation import AdminOperation
 
 
 def repos() -> Iterator[RepoDefinition]:

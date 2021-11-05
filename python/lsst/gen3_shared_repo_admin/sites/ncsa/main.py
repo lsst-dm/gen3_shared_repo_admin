@@ -45,7 +45,7 @@ from . import hsc
 from . import decam
 
 if TYPE_CHECKING:
-    from ._operation import AdminOperation
+    from ..._operation import AdminOperation
 
 
 def repos() -> Iterator[RepoDefinition]:

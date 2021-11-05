@@ -49,8 +49,8 @@ from ...instruments.dc2 import (
 from ._site import NCSA
 
 if TYPE_CHECKING:
-    from ._operation import AdminOperation
-    from ._tool import RepoAdminTool
+    from ..._operation import AdminOperation
+    from ..._tool import RepoAdminTool
 
 
 def repos() -> Iterator[RepoDefinition]:

@@ -4,7 +4,7 @@ This configuration only affects single-package Sphinx documentation builds.
 """
 
 from documenteer.sphinxconfig.stackconf import build_package_configs
-import lsst.gen3.shared.repo.admin
+import lsst.gen3_shared_repo_admin
 
 
 _g = globals()
