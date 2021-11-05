@@ -33,7 +33,7 @@ __all__ = ()
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
-from ..._repo_definition import RepoDefinition
+from ..._repo_definition import HomogeneousRepoDefinition, RepoDefinition
 from ... import calibs
 from ... import common
 from ... import ingest
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 def repos() -> Iterator[RepoDefinition]:
     """Generate the definitions for the `/repo/main` data repository at NCSA.
     """
-    yield RepoDefinition(name="main", date="20210215", site=NCSA, operations=operations)
+    yield HomogeneousRepoDefinition(name="main", date="20210215", site=NCSA, operations=operations)
 
 
 def operations() -> Iterator[AdminOperation]:

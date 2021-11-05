@@ -23,9 +23,10 @@ from __future__ import annotations
 
 __all__ = ("NCSA",)
 
-from ..._site_definition import SiteDefinition
+from ..._site_definition import HomogeneousSiteDefinition
 
-NCSA = SiteDefinition(
+
+NCSA = HomogeneousSiteDefinition(
     name="NCSA",
     repo_uri_template="/repo/{repo.name}_{repo.date}",
     db_namespace_template="{repo.name}_{repo.date}",

@@ -111,7 +111,7 @@ class RepoAdminTool:
     def root(self) -> str:
         """Absolute path or URI to the data repository root (`str`).
         """
-        return self.site.repo_uri_template.format(repo=self.repo)
+        return self.repo.root
 
     @property
     def butler(self) -> Butler:

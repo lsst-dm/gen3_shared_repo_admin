@@ -32,7 +32,7 @@ from pathlib import Path
 import textwrap
 from typing import Dict, Iterator, TYPE_CHECKING
 
-from ..._repo_definition import RepoDefinition
+from ..._repo_definition import HomogeneousRepoDefinition, RepoDefinition
 from ... import common
 from ... import calibs
 from ... import check
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 def repos() -> Iterator[RepoDefinition]:
     """Generate the definitions for the `/repo/dc2` data repository at NCSA.
     """
-    yield RepoDefinition(name="dc2", date="20210215", site=NCSA, operations=operations)
+    yield HomogeneousRepoDefinition(name="dc2", date="20210215", site=NCSA, operations=operations)
 
 
 def operations() -> Iterator[AdminOperation]:

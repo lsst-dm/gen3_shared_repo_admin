@@ -20,19 +20,21 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+from abc import abstractmethod
 
-__all__ = ("RepoDefinition",)
+__all__ = ("RepoDefinition", "HomogeneousRepoDefinition")
 
+from abc import ABC
 import dataclasses
-from typing import Callable, Iterator, TYPE_CHECKING
+from typing import Callable, Iterator, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ._site_definition import SiteDefinition
+    from ._site_definition import SiteDefinition, HomogeneousSiteDefinition
     from ._operation import AdminOperation
 
 
 @dataclasses.dataclass
-class RepoDefinition:
+class RepoDefinition(ABC):
     """Struct that defines a particular instance of data repository.
 
     Notes
@@ -92,3 +94,47 @@ class RepoDefinition:
 
     Templates that evaluate to URIs that do not exist are ignored.
     """
+
+    @property
+    @abstractmethod
+    def root(self) -> str:
+        """The repository root URI."""
+        raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def db_uri(self) -> str:
+        """The database URI used for the Registry."""
+        raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def db_namespace(self) -> Optional[str]:
+        """The database namespace/schema used for the registry."""
+        raise NotImplementedError()
+
+
+@dataclasses.dataclass
+class HomogeneousRepoDefinition(RepoDefinition):
+    """A repo subclass where all data repository roots, database URIs, and
+    database namespaces at a site share a common naming pattern.
+
+    This repo class should be used with the `HomogeneousSiteDefinition` class.
+    """
+
+    site: HomogeneousSiteDefinition
+
+    @property
+    def root(self) -> str:
+        return self.site.repo_uri_template.format(repo=self)
+
+    @property
+    def db_uri(self) -> str:
+        return self.site.db_uri_template.format(repo=self)
+
+    @property
+    def db_namespace(self) -> Optional[str]:
+        if self.site.db_namepace_template is not None:
+            return self.site.db_namespace_template.format(repo=self)
+        else:
+            return None

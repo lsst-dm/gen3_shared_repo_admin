@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-__all__ = ("SiteDefinition",)
+__all__ = ("SiteDefinition", "HomogeneousSiteDefinition")
 
 import dataclasses
 
@@ -30,20 +30,19 @@ import dataclasses
 class SiteDefinition:
     """Struct that defines URI templates for a particular compute center or
     data facility.
-
-    Notes
-    -----
-    The separation between `SiteDefinition` and `RepoDefinition` regarding what
-    is actually site-specific is not great; `SiteDefinition` just contains
-    things that are pretty clearly necessary for *all* sites to define, with
-    exactly the same structure, while `RepoDefinition` instances often include
-    `AdminOperation` lists that really are quite site-specific in practice.
-    At present, it just isn't worth the effort to try to fix this, especially
-    with only one concrete site to use as an example.
     """
 
     name: str
     """Unique name for the site.
+    """
+
+
+@dataclasses.dataclass
+class HomogeneousSiteDefinition(SiteDefinition):
+    """A site subclass where all data repository roots, database URIs, and
+    database namespaces share a common naming pattern.
+
+    This site class should be used with the `HomogeneousRepoDefinition` class.
     """
 
     repo_uri_template: str

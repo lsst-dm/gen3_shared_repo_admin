@@ -33,7 +33,7 @@ __all__ = ()
 
 from typing import Iterator, TYPE_CHECKING
 
-from ..._repo_definition import RepoDefinition
+from ..._repo_definition import HomogeneousRepoDefinition, RepoDefinition
 from ... import common
 from ._site import NCSA
 
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 def repos() -> Iterator[RepoDefinition]:
     """Generate the definitions for the `/repo/ccso` data repository at NCSA.
     """
-    yield RepoDefinition(name="ccso", date="20210215", site=NCSA, operations=operations)
+    yield HomogeneousRepoDefinition(name="ccso", date="20210215", site=NCSA, operations=operations)
 
 
 def operations() -> Iterator[AdminOperation]:

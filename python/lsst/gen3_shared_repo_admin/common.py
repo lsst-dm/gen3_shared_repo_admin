@@ -168,8 +168,8 @@ class CreateRepo(AdminOperation):
             Butler configuration object.
         """
         config = Config()
-        config[".registry.db"] = tool.site.db_uri_template.format(repo=tool.repo)
-        config[".registry.namespace"] = tool.site.db_namespace_template.format(repo=tool.repo)
+        config[".registry.db"] = repo=tool.repo.db_uri
+        config[".registry.namespace"] = tool.repo.db_namespace
         for template in tool.repo.butler_config_templates:
             uri = ButlerURI(template.format(repo=tool.repo, site=tool.site))
             if uri.exists():
