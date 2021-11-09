@@ -94,7 +94,7 @@ class RefCatIngest(AdminOperation):
         self.path = path
         self.collection = collection
 
-    REGEX = re.compile(r"(\d+)\.fits")
+    REGEX = re.compile(r"^(\d+)\.fits$")
 
     def print_status(self, tool: RepoAdminTool, indent: int) -> None:
         # Docstring inherited.
