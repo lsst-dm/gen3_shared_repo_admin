@@ -20,17 +20,18 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
 from abc import abstractmethod
 
-__all__ = ("RepoDefinition", "HomogeneousRepoDefinition")
+__all__ = ("RepoDefinition", "HomogeneousRepoDefinition", "IndependentRepoDefinition")
 
-from abc import ABC
 import dataclasses
-from typing import Callable, Iterator, Optional, TYPE_CHECKING
+from abc import ABC
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 
 if TYPE_CHECKING:
-    from ._site_definition import SiteDefinition, HomogeneousSiteDefinition
     from ._operation import AdminOperation
+    from ._site_definition import HomogeneousSiteDefinition, SiteDefinition
 
 
 @dataclasses.dataclass
@@ -138,3 +139,34 @@ class HomogeneousRepoDefinition(RepoDefinition):
             return self.site.db_namespace_template.format(repo=self)
         else:
             return None
+
+
+class IndependentRepoDefinition(RepoDefinition):
+    """A repo subclass that stores its root, database URI, and database
+    namespace explicitly.
+    """
+    def __init__(
+        self,
+        root: str,
+        db_uri: Optional[str] = None,
+        db_namespace: Optional[str] = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self._root = root
+        self._db_uri = (
+            db_uri if db_uri is not None else f"sqlite://{self._root}/gen3.sqlite3"
+        )
+        self._db_namespace = db_namespace
+
+    @property
+    def root(self) -> str:
+        return self._root
+
+    @property
+    def db_uri(self) -> str:
+        return self._db_uri
+
+    @property
+    def db_namespace(self) -> Optional[str]:
+        return self._db_namespace
