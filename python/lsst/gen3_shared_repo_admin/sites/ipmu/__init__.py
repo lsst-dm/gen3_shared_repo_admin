@@ -19,17 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("REPOS",)
+"""Concrete definitions of data repositories at IPMU.
 
-import itertools
+This package contains one public submodule for each major data repository, as
+well as public submodules for some instruments within these.  The package-level
+`repos` function iterates over all nested `RepoDefinition` instances.
+"""
 
-from . import ncsa
-from . import ipmu
-
-
-REPOS = {
-    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
-        ncsa.repos(),
-        ipmu.repos(),
-    )
-}
+from ._site import IPMU
+from ._repos import repos

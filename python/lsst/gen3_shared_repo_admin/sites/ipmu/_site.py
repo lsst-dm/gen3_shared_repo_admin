@@ -19,17 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("REPOS",)
+from __future__ import annotations
 
-import itertools
+__all__ = ("IPMU",)
 
-from . import ncsa
-from . import ipmu
+from ..._site_definition import SiteDefinition
 
-
-REPOS = {
-    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
-        ncsa.repos(),
-        ipmu.repos(),
-    )
-}
+IPMU = SiteDefinition(name="IPMU")
