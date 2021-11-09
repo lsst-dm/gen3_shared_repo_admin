@@ -272,7 +272,8 @@ class ExposureFinder(ExposureIdSource):
         file_regex : `str`
             Regular expression to match against filenames (including
             extensions, but not including the directory).  For file symlinks,
-            this is applied to the symlink, not its target.
+            this is applied to the symlink first, and then its target, only if
+            the symlink does not match.
         follow_symlinks : `bool`, optional
             If `True`, follow directory and file symlinks.  If `False`
             (default) all symlinks are ignored.
@@ -292,6 +293,10 @@ class ExposureFinder(ExposureIdSource):
                 if entry.is_file(follow_symlinks=follow_symlinks):
                     if (m := compiled_regex.match(entry.name)) is not None:
                         yield Path(entry.path if not follow_symlinks else os.path.realpath(entry.path)), m
+                    elif follow_symlinks:
+                        real = Path(os.path.realpath(entry.path))
+                        if (m := compiled_regex.match(real.name)) is not None:
+                            yield real, m
                 elif entry.is_dir(follow_symlinks=follow_symlinks):
                     subdirs.append(entry.path if not follow_symlinks else os.path.realpath(entry.path))
                 # Else case is deliberately ignored; possibilities are
