@@ -183,6 +183,8 @@ def rerun_operations() -> Iterator[AdminOperation]:
     in the `/repo/main` data repository at NCSA.
     """
     for weekly, ticket in {
+        "w_2021_46": "DM-32766",
+        "w_2021_42": "DM-32419",
         "w_2021_38": "DM-31815",
         "w_2021_34": "DM-31477",
         "w_2021_30": "DM-31184",

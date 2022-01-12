@@ -372,6 +372,8 @@ def med1_rerun_operations() -> Iterator[AdminOperation]:
     of the test-med-1 subset.
     """
     for weekly, ticket in {
+        "w_2021_44": "DM-32706",
+        "w_2021_40": "DM-32071",
         "w_2021_36": "DM-31665",
         "w_2021_32": "DM-31351",
         "w_2021_28": "DM-31067",
