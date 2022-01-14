@@ -23,11 +23,13 @@ from __future__ import annotations
 
 __all__ = ("repos",)
 
+from pathlib import Path
 from typing import Iterator
 
 from ..._repo_definition import RepoDefinition
 from ..._operation import AdminOperation
 from ... import common
+from ... import refcats
 from ._site import Princeton
 
 
@@ -40,3 +42,12 @@ def repos() -> Iterator[RepoDefinition]:
 
 def operations() -> Iterator[AdminOperation]:
     yield common.CreateRepo()
+    yield common.RegisterSkyMap("hsc_rings_v1")
+    yield from refcats.ingest_refcats(
+        "init",
+        Path("/projects/HSC/refcats/htm"),
+        (
+            "gaia_dr2_20200414",
+            "ps1_pv3_3pi_20170110",
+        )
+    )
