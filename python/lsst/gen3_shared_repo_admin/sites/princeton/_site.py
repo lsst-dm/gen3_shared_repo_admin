@@ -19,16 +19,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("REPOS",)
+from __future__ import annotations
 
-import itertools
+__all__ = ("Princeton",)
 
-from . import ncsa
-from . import princeton
+from ..._site_definition import SiteDefinition
 
-REPOS = {
-    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
-        ncsa.repos(),
-        princeton.repos(),
-    )
-}
+Princeton = SiteDefinition(
+    name="Princeton",
+    repo_uri_template="/projects/HSC/gen3/{repo.name}_{repo.date}",
+    db_namespace_template="{repo.name}",
+    db_uri_template="postgresql://localhost:5432/merian",
+)

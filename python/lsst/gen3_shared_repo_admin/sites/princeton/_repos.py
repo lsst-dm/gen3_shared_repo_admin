@@ -19,16 +19,24 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("REPOS",)
+from __future__ import annotations
 
-import itertools
+__all__ = ("repos",)
 
-from . import ncsa
-from . import princeton
+from typing import Iterator
 
-REPOS = {
-    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
-        ncsa.repos(),
-        princeton.repos(),
-    )
-}
+from ..._repo_definition import RepoDefinition
+from ..._operation import AdminOperation
+from ... import common
+from ._site import Princeton
+
+
+def repos() -> Iterator[RepoDefinition]:
+    """Iterate over all concrete `RepoDefinition` objects defined by this
+    package.
+    """
+    yield RepoDefinition(name="hsc_all", date="20220113", site=Princeton, operations=operations)
+
+
+def operations() -> Iterator[AdminOperation]:
+    yield common.CreateRepo()
