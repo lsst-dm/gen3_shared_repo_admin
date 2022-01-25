@@ -19,16 +19,5 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("REPOS",)
-
-import itertools
-
-from . import ncsa
-from . import princeton
-
-REPOS = {
-    (repo.name, repo.date, repo.site.name): repo for repo in itertools.chain(
-        ncsa.repos(),
-        princeton.repos(),
-    )
-}
+from ._site import Princeton
+from ._repos import repos
