@@ -427,7 +427,9 @@ class _SaveFoundExposuresAdapter(AdminOperation, ExposureFinder):
     def run(self, tool: RepoAdminTool) -> None:
         # Docstring inherited.
         found_as_strs = {str(k): str(v) for k, v in self._adapted.find(tool).items()}
-        with open(self._filename(tool), "w") as stream:
+        filename = self._filename(tool)
+        os.makedirs(filename.parent, exist_ok=True)
+        with open(filename, "w") as stream:
             json.dump(found_as_strs, stream, indent=0)
 
     def _filename(self, tool: RepoAdminTool) -> Path:
