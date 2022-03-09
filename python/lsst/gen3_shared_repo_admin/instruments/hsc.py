@@ -116,41 +116,66 @@ class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
         If `True`, allow incomplete exposures that do not have a full
         complement of detectors (including wavefront sensors, but not focus
         sensors).  Default is `False`.
+    gen2_repo : `bool`, optional
+        If `True`, look for files with templates that match the Gen2 butler
+        repository template, i.e. "HSC-{exposure:07d}-{detector:03d}.fits".
+        If `False` (default), look for filenames that start with "HSCA"
+        followed by an 8-digit number that can be unpacked into the exposure
+        and detector ID.
     **kwargs
         Forwarded to `UnstructuredExposureFinder`.
     """
 
-    def __init__(self, root: Path, *, allow_incomplete: bool = False, **kwargs: Any):
-        super().__init__(root, self.FILE_REGEX, **kwargs)
+    def __init__(
+        self,
+        root: Path,
+        *,
+        allow_incomplete: bool = False,
+        gen2_repo: bool = False,
+        **kwargs: Any,
+    ):
+        if gen2_repo:
+            file_regex = r"HSC\-(\d{7})\-(\d{3})\.fits"
+        else:
+            file_regex = r"HSCA(\d{8})\.fits"
+        super().__init__(root, file_regex, **kwargs)
         self._root = root
         self._allow_incomplete = allow_incomplete
-
-    FILE_REGEX = r"HSCA(\d{8}).fits"
+        self._gen2_repo = gen2_repo
 
     DETECTOR_NUMS_FOR_FILENAMES = (
         list(range(0, 49)) + list(range(51, 58)) + list(range(100, 149)) + list(range(151, 158))
     )
-    """HSC internal detector IDs used in filenames.
+    """HSC internal detector IDs used in HSCA* filenames.
+
+    In the Gen2 repo form, the detector IDs are just range(0, 112).
     """
 
     def extract_exposure_id(self, tool: RepoAdminTool, match: re.Match) -> int:
         # Docstring inherited.
         # HSC visit/exposure IDs are always even-numbered, to allow for
         # more than 100 CCDs while otherwise using the same pattern as the
-        # old Supreme-Cam.  The CCD identifiers here aren't the
-        # pure-integer ones we prefer to use in the pipelines, so we ignore
-        # them entirely; we'll get those from metadata extraction during
-        # actualy ingest anyway.
-        exposure_id = int(match.group(1)) // 100
-        exposure_id -= exposure_id % 2
+        # old Supreme-Cam.
+        if self._gen2_repo:
+            exposure_id = int(match.group(1))
+        else:
+            exposure_id = int(match.group(1)) // 100
+            exposure_id -= exposure_id % 2
         return exposure_id
 
     def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
         # Docstring inherited.
         base = found[exposure_id]
         result = set()
-        for detector_num in self.DETECTOR_NUMS_FOR_FILENAMES:
-            path = base.joinpath(f"HSCA{exposure_id*100 + detector_num:08d}.fits")
+        if self._gen2_repo:
+            detector_nums = list(range(112))
+        else:
+            detector_nums = self.DETECTOR_NUMS_FOR_FILENAMES
+        for detector_num in detector_nums:
+            if self._gen2_repo:
+                path = base.joinpath(f"HSC-{exposure_id:07d}-{detector_num:03d}.fits")
+            else:
+                path = base.joinpath(f"HSCA{exposure_id*100 + detector_num:08d}.fits")
             if path.exists():
                 result.add(path)
             elif not self._allow_incomplete:
