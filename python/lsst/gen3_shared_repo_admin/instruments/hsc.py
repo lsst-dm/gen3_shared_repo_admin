@@ -102,10 +102,11 @@ class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
     """An `ExposureFinder` implementation for HSC data.
 
     This finder expects many exposures to be present in directories, and makes
-    no assumptions about how those directories are organized.  It does assume
-    that the filenames themselves are the original ``HSCA*.fits`` names,
-    allowing exposure IDs to be derived from those names.  Symbolic links are
-    never followed.
+    no assumptions about how those directories are organized, as long as the
+    images for a single exposure are not split up across different directories.
+    It does assume that the filenames themselves are either the original
+    ``HSCA*.fits`` names or the ``HSC-*-*.fits`` Gen2 names, allowing exposure
+    IDs to be derived from those names.
 
     Parameters
     ----------
@@ -116,12 +117,6 @@ class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
         If `True`, allow incomplete exposures that do not have a full
         complement of detectors (including wavefront sensors, but not focus
         sensors).  Default is `False`.
-    gen2_repo : `bool`, optional
-        If `True`, look for files with templates that match the Gen2 butler
-        repository template, i.e. "HSC-{exposure:07d}-{detector:03d}.fits".
-        If `False` (default), look for filenames that start with "HSCA"
-        followed by an 8-digit number that can be unpacked into the exposure
-        and detector ID.
     **kwargs
         Forwarded to `UnstructuredExposureFinder`.
     """
@@ -131,17 +126,13 @@ class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
         root: Path,
         *,
         allow_incomplete: bool = False,
-        gen2_repo: bool = False,
         **kwargs: Any,
     ):
-        if gen2_repo:
-            file_regex = r"HSC\-(\d{7})\-(\d{3})\.fits"
-        else:
-            file_regex = r"HSCA(\d{8})\.fits"
-        super().__init__(root, file_regex, **kwargs)
+        super().__init__(root, self.FILE_REGEX, **kwargs)
         self._root = root
         self._allow_incomplete = allow_incomplete
-        self._gen2_repo = gen2_repo
+
+    FILE_REGEX = r"(?P<original>HSCA(?P<mangled>\d{8}))|(?P<gen2>HSC\-(?P<exp>\d{7})\-(\d{3}))\.fits"
 
     DETECTOR_NUMS_FOR_FILENAMES = (
         list(range(0, 49)) + list(range(51, 58)) + list(range(100, 149)) + list(range(151, 158))
@@ -156,30 +147,43 @@ class HyperSuprimeCamExposureFinder(ingest.UnstructuredExposureFinder):
         # HSC visit/exposure IDs are always even-numbered, to allow for
         # more than 100 CCDs while otherwise using the same pattern as the
         # old Supreme-Cam.
-        if self._gen2_repo:
-            exposure_id = int(match.group(1))
+        if match.group("gen2") is not None:
+            exposure_id = int(match.group("exp"))
         else:
-            exposure_id = int(match.group(1)) // 100
+            exposure_id = int(match.group("mangled")) // 100
             exposure_id -= exposure_id % 2
         return exposure_id
+
+    def _expand_gen2_paths(self, tool: RepoAdminTool, exposure_id: int, base: Path) -> Set[Path]:
+        """Implementation of `expand` that assumes Gen2 filename templates.
+        """
+        result = set()
+        for detector_num in list(range(112)):
+            if self._gen2_repo:
+                path = base.joinpath(f"HSC-{exposure_id:07d}-{detector_num:03d}.fits")
+            if path.exists():
+                result.add(path)
+        return result
+
+    def _expand_original_paths(self, tool: RepoAdminTool, exposure_id: int, base: Path) -> Set[Path]:
+        """Implementation of `expand` that assumes original filename templates.
+        """
+        result = set()
+        detector_nums = self.DETECTOR_NUMS_FOR_FILENAMES
+        for detector_num in detector_nums:
+            path = base.joinpath(f"HSCA{exposure_id*100 + detector_num:08d}.fits")
+            if path.exists():
+                result.add(path)
+        return result
 
     def expand(self, tool: RepoAdminTool, exposure_id: int, found: Dict[int, Path]) -> Set[Path]:
         # Docstring inherited.
         base = found[exposure_id]
-        result = set()
-        if self._gen2_repo:
-            detector_nums = list(range(112))
-        else:
-            detector_nums = self.DETECTOR_NUMS_FOR_FILENAMES
-        for detector_num in detector_nums:
-            if self._gen2_repo:
-                path = base.joinpath(f"HSC-{exposure_id:07d}-{detector_num:03d}.fits")
-            else:
-                path = base.joinpath(f"HSCA{exposure_id*100 + detector_num:08d}.fits")
-            if path.exists():
-                result.add(path)
-            elif not self._allow_incomplete:
-                raise FileNotFoundError(f"Missing raw {path} for {exposure_id}.")
+        result = self._expand_original_paths(tool, exposure_id, base)
+        if len(result) < 112:
+            result.update(self._expand_gen2_paths(tool, exposure_id, base))
+            if len(result) < 112 and not self._allow_incomplete:
+                raise FileNotFoundError(f"Missing {112 - len(result)} raws for {exposure_id}.")
         return result
 
 
